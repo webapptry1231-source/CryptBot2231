@@ -137,6 +137,7 @@ async def run_live_scan(send_func) -> list[str]:
             if msg:
                 await send_func(msg)
                 messages.append(msg)
+                await asyncio.sleep(0.5)
                 tp = round(price * (1 + TP_PERCENT/100), 4)
                 sl = round(price * (1 - SL_PERCENT/100), 4)
                 log_signal(symbol, score, reason, price, tp, sl)

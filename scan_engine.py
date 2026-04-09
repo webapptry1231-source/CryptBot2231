@@ -6,7 +6,7 @@ from scorer import calculate_score
 from config import (TIMEFRAME, TIMEFRAME_4H, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD,
                    TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT,
                    DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
-                   SL_OVERRIDES)
+                   SL_OVERRIDES, MAX_CONCURRENT_TRADES)
 
 logger = logging.getLogger(__name__)
 MAX_OPEN_TRADES = 3
@@ -38,11 +38,16 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         trades_per_day = {}
         last_signal_time = {}
         open_positions = set()
+        total_concurrent = 0
         total_scanned = 0
         signals_found = 0
         
         for i in range(24, total_candles - MAX_HOLD_CANDLES):
             total_scanned += 1
+            
+            if total_concurrent >= MAX_CONCURRENT_TRADES:
+                continue
+            
             day_idx = i // 24
             if day_idx >= days_checked:
                 break
@@ -84,6 +89,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             
             signals_found += 1
             last_signal_time[symbol] = entry_time
+            total_concurrent += 1
             
             entry_price = window.iloc[-1]['close']
             open_positions.add(symbol)
