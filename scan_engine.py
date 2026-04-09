@@ -39,29 +39,27 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         
         results = []
         total_candles = len(df)
-        days_checked = min(days, total_candles - MAX_HOLD_CANDLES)
         
         trend_bullish = check_4h_trend(symbol)
-        trend_check_interval = 16
         
         trades_per_day = {}
         last_signal_time = {}
-        open_positions = set()
-        total_concurrent = 0
         total_scanned = 0
         signals_found = 0
+        scan_start_time = None
         
         for i in range(24, total_candles - MAX_HOLD_CANDLES):
-            total_scanned += 1
-            day_idx = i // 24
-            if day_idx >= days_checked:
-                break
+            if scan_start_time is None:
+                scan_start_time = df.index[0]
             
-            # if total_concurrent >= MAX_CONCURRENT_TRADES:
-            #     continue
+            current_time = df.index[i]
+            hours_elapsed = (current_time - scan_start_time).total_seconds() / 3600
             
-            if i % trend_check_interval == 0:
+            if hours_elapsed >= 4:
                 trend_bullish = check_4h_trend(symbol)
+                scan_start_time = current_time
+            
+            total_scanned += 1
             
             if not trend_bullish:
                 continue
