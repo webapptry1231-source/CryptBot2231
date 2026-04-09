@@ -142,38 +142,38 @@ async def run_historical_scan(send_func):
         await send_func("❌ No scan results generated")
         return
     
+    results = results[:100]
+    
     summary = calculate_summary(results)
     
-    msg = f"📊 BTC DAILY BACKTEST ({HISTORICAL_DAYS} days)\n"
+    msg = f"📊 BTC BACKTEST SUMMARY ({HISTORICAL_DAYS} days)\n"
     msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"💰 Buy Amount: ${BUY_AMOUNT} × {LEVERAGE}x = ${BUY_AMOUNT * LEVERAGE}\n"
+    msg += f"💰 Buy: ${BUY_AMOUNT} × {LEVERAGE}x = ${BUY_AMOUNT * LEVERAGE}\n"
     msg += f"📈 Total Trades: {summary['total']}\n"
-    msg += f"✅ TP Hit: {summary['tp']} | ❌ SL Hit: {summary['sl']}\n"
-    msg += f"💵 Total PnL: {summary['total_pnl']:.2f}% | ${summary['total_pnl_usd']}\n"
-    msg += f"🎯 Win Rate: {summary['win_rate']}%\n"
+    msg += f"✅ TP: {summary['tp']} | ❌ SL: {summary['sl']} | 🎯 Win: {summary['win_rate']}%\n"
+    msg += f"💵 Total PnL: ${summary['total_pnl_usd']:.2f}\n"
     msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     
-    daily_pnl = {}
-    for r in results:
-        if r['date'] not in daily_pnl:
-            daily_pnl[r['date']] = {"count": 0, "pnl": 0}
-        daily_pnl[r['date']]["count"] += 1
-        daily_pnl[r['date']]["pnl"] += r['pnl_usd_after_fee']
-    
-    for date, data in sorted(daily_pnl.items(), reverse=True)[:15]:
-        emoji = "✅" if data['pnl'] > 0 else "❌"
-        msg += f"{emoji} {date}: {data['count']} trades | PnL: ${data['pnl']:.2f}\n"
-    
-    msg += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"📋 LAST 20 TRADES:\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    
-    for r in results[-20:]:
-        emoji = "✅" if r['pnl_usd_after_fee'] > 0 else "❌"
-        msg += f"{emoji} {r['date']} {r['time']} | ${r['buy_amount']}×{r['leverage']}x | Entry:{r['entry']}\n"
-        msg += f"   → Exit:{r['exit']} | {r['result']} | PnL:${r['pnl_usd_after_fee']:.2f}\n"
-    
     await send_func(msg)
+    
+    chunk_size = 15
+    for i in range(0, len(results), chunk_size):
+        chunk = results[i:i+chunk_size]
+        msg = ""
+        for r in chunk:
+            emoji = "✅" if r['pnl_usd_after_fee'] > 0 else "❌"
+            notional = r['buy_amount'] * r['leverage']
+            qty = notional / r['entry']
+            msg += f"{emoji} {r['date']} {r['time']}\n"
+            msg += f"📌 {r['entry']} → {r['exit']}\n"
+            msg += f"🛑 SL:{r['sl']} | 🎯 TP:{r['tp']}\n"
+            msg += f"📦 ${notional} | Qty:{qty:.4f} BTC\n"
+            msg += f"💵 PnL: ${r['pnl_usd_after_fee']:.2f} ({r['pnl_after_fee']:.2f}%) | {r['result']}\n"
+            msg += f"📊 Score:{r['score']} | {r['reason']}\n"
+            msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        await send_func(msg)
+    
+    logger.info(f"Historical scan complete: {summary['total']} trades, PnL: ${summary['total_pnl_usd']}")
     logger.info(f"Historical scan complete: {summary['total']} trades, PnL: ${summary['total_pnl_usd']}")
 
 async def run_live_scan(send_func) -> list[str]:
