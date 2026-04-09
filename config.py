@@ -36,7 +36,7 @@ HISTORIC_MODE = os.getenv("HISTORIC_MODE", "false").lower() == "true"
 LIVE_MODE = os.getenv("LIVE_MODE", "false").lower() == "true"
 HYBRID_MODE = os.getenv("HYBRID_MODE", "false").lower() == "true"
 
-HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "30"))
+HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "90"))
 BUY_AMOUNT = float(os.getenv("BUY_AMOUNT", "50"))
 
 DAILY_TRADE_CAP = 2

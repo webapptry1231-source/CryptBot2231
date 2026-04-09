@@ -1,3 +1,4 @@
+# DEPRECATED: Use scan_engine.scan_daily_historical() instead. This file is not maintained.
 import pandas as pd
 from config import (COINS, TIMEFRAME, TP_PERCENT, SL_PERCENT,
                     MAX_HOLD_CANDLES, FEE_PERCENT, STRONG_SIGNAL_THRESHOLD)

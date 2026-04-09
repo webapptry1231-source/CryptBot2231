@@ -1,14 +1,20 @@
 import ccxt
 import pandas as pd
 import time
+import threading
 
-exchange = ccxt.bybit({
-    'enableRateLimit': True,
-    'options': {'defaultType': 'future'}
-})
+_exchange_lock = threading.Lock()
+
+def _get_exchange():
+    return ccxt.bybit({
+        'enableRateLimit': True,
+        'options': {'defaultType': 'future'}
+    })
 
 def fetch_ohlcv(symbol: str, timeframe: str = "15m", limit: int = 300) -> pd.DataFrame:
-    raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    with _exchange_lock:
+        exchange = _get_exchange()
+        raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
     df = pd.DataFrame(raw, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
     df.set_index('timestamp', inplace=True)
@@ -18,9 +24,12 @@ def fetch_ohlcv(symbol: str, timeframe: str = "15m", limit: int = 300) -> pd.Dat
 def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int = 90) -> pd.DataFrame:
     since_ms = int((pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=days_back)).timestamp() * 1000)
     all_candles = []
-
+    
+    exchange = _get_exchange()
+    
     while True:
-        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=1000)
+        with _exchange_lock:
+            batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=1000)
         if not batch:
             break
         all_candles.extend(batch)
@@ -28,7 +37,7 @@ def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int =
         time.sleep(exchange.rateLimit / 1000)
         if len(batch) < 1000:
             break
-
+    
     df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
     df.set_index('timestamp', inplace=True)

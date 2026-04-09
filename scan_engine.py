@@ -6,7 +6,8 @@ from scorer import calculate_score
 from config import (TIMEFRAME, TIMEFRAME_4H, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD,
                    TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT,
                    DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
-                   SL_OVERRIDES, MAX_CONCURRENT_TRADES)
+                   SL_OVERRIDES, MAX_CONCURRENT_TRADES,
+                   PARTIAL_TP_PERCENT, PARTIAL_TP_SIZE, TRAILING_STOP_PERCENT, FEE_PERCENT)
 
 logger = logging.getLogger(__name__)
 MAX_OPEN_TRADES = 3
@@ -113,39 +114,53 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             tp_price = entry_price * (1 + TP_PERCENT/100)
             sl_price = entry_price * (1 - sl_percent/100)
             
-            hit_tp_idx = None
-            hit_sl_idx = None
+            partial_tp_hit = False
+            partial_tp_price = entry_price * (1 + PARTIAL_TP_PERCENT/100)
+            trailing_sl = sl_price
+            running_high = entry_price
+            trade_closed = False
             
             for j in range(len(future)):
                 candle = future.iloc[j]
-                if candle['high'] >= tp_price:
-                    hit_tp_idx = j
+                running_high = max(running_high, candle['high'])
+                
+                if not partial_tp_hit and candle['high'] >= partial_tp_price:
+                    partial_tp_hit = True
+                    trailing_sl = entry_price
+                
+                if partial_tp_hit:
+                    new_trail = running_high * (1 - TRAILING_STOP_PERCENT/100)
+                    trailing_sl = max(trailing_sl, new_trail)
+                
+                if partial_tp_hit and candle['high'] >= tp_price:
+                    pnl_pct = TP_PERCENT
+                    result = "TP HIT"
+                    exit_price = future.iloc[j]['high']
+                    exit_time = future.index[j]
+                    hold_hours = (exit_time - entry_time).total_seconds() / 3600
+                    trade_closed = True
+                    break
+                
+                if candle['low'] <= trailing_sl:
+                    if partial_tp_hit:
+                        pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
+                        result = "TRAIL STOP"
+                    else:
+                        pnl_pct = -SL_PERCENT
+                        result = "SL HIT"
+                    exit_price = candle['low']
+                    exit_time = future.index[j]
+                    hold_hours = (exit_time - entry_time).total_seconds() / 3600
+                    trade_closed = True
                     break
             
-            for j in range(len(future)):
-                candle = future.iloc[j]
-                if candle['low'] <= sl_price:
-                    hit_sl_idx = j
-                    break
-            
-            if hit_tp_idx is not None and (hit_sl_idx is None or hit_tp_idx < hit_sl_idx):
-                pnl_pct = TP_PERCENT
-                result = "TP HIT"
-                exit_price = future.iloc[hit_tp_idx]['high']
-                exit_time = future.index[hit_tp_idx]
-                hold_hours = (exit_time - entry_time).total_seconds() / 3600
-            elif hit_sl_idx is not None:
-                pnl_pct = -SL_PERCENT
-                result = "SL HIT"
-                exit_price = future.iloc[hit_sl_idx]['low']
-                exit_time = future.index[hit_sl_idx]
-                hold_hours = (exit_time - entry_time).total_seconds() / 3600
-            elif exit_price > entry_price:
-                pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
-                result = "PROFIT"
-            else:
-                pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
-                result = "LOSS"
+            if not trade_closed:
+                if exit_price > entry_price:
+                    pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
+                    result = "PROFIT"
+                else:
+                    pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
+                    result = "LOSS"
             
             open_positions.discard(symbol)
             total_concurrent = max(0, total_concurrent - 1)

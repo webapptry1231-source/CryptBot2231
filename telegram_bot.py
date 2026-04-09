@@ -78,7 +78,7 @@ async def run_historical_scan(send_func):
         await send_func("❌ No scan results generated")
         return
     
-    results = results[:100]
+    results = results[:500]
     
     summary = calculate_summary(results)
     
