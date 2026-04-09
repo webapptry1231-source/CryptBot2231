@@ -2,7 +2,7 @@ import ccxt
 import pandas as pd
 import time
 
-exchange = ccxt.binance({
+exchange = ccxt.bybit({
     'enableRateLimit': True,
     'options': {'defaultType': 'future'}
 })
