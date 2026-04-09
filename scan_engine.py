@@ -126,8 +126,6 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             result = "PENDING"
             
             for j in range(len(future)):
-            
-            for j in range(len(future)):
                 candle = future.iloc[j]
                 running_high = max(running_high, candle['high'])
                 
