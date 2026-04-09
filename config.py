@@ -23,3 +23,9 @@ MAX_HOLD_CANDLES = 20
 FEE_PERCENT = 0.05
 
 SIMULATION_MODE = True
+
+HISTORIC_MODE = os.getenv("HISTORIC_MODE", "false").lower() == "true"
+LIVE_MODE = os.getenv("LIVE_MODE", "false").lower() == "true"
+HYBRID_MODE = os.getenv("HYBRID_MODE", "false").lower() == "true"
+
+HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "90"))
