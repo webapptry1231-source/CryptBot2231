@@ -30,6 +30,9 @@ async def scan_all_coins(send_func) -> list[str]:
                 log_signal(symbol, score, reason, price, tp, sl)
         except Exception as e:
             logger.error(f"Error scanning {symbol}: {e}")
+            logger.info(f"Traceback:", exc_info=True)
+        else:
+            logger.info(f"DEBUG: {symbol} - score={score}, reason={reason}, price={price}")
     return messages
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
