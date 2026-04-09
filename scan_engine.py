@@ -57,8 +57,8 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if day_idx >= days_checked:
                 break
             
-            if total_concurrent >= MAX_CONCURRENT_TRADES:
-                continue
+            # if total_concurrent >= MAX_CONCURRENT_TRADES:
+            #     continue
             
             if i % trend_check_interval == 0:
                 trend_bullish = check_4h_trend(symbol)
@@ -66,8 +66,8 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if not trend_bullish:
                 continue
             
-            if symbol in open_positions:
-                continue
+            # if symbol in open_positions:
+            #     continue
             
             window = df.iloc[:i]
             if len(window) < 50:
@@ -128,6 +128,8 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             open_positions.add(symbol)
             
             hold_candles = min(MAX_HOLD_CANDLES, total_candles - i - 1)
+            if hold_candles < 1:
+                continue
             future = df.iloc[i:i+hold_candles]
             if len(future) == 0:
                 open_positions.discard(symbol)
