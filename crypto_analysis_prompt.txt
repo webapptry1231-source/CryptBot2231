@@ -1,0 +1,101 @@
+# CONTEXT
+I have built a crypto trading bot (Telegram-based) that generates intraday trading calls for BTC/USDT futures. Each call includes:
+- Entry time & price
+- Stop loss (SL) price
+- Take profit (TP) price
+- Leverage used
+- Position size (fixed buy amount × leverage)
+- Score (signal strength 0-100)
+- Reason (technical indicators triggering the signal)
+- Hold duration (how long trade was held)
+
+I have collected **30 days of historical backtest data** (simulated trades). I want you to analyze this data to help me tune, optimize, and identify weaknesses in my strategy BEFORE deploying live.
+
+# YOUR ROLE
+Act as an expert quantitative trading analyst specializing in crypto intraday futures strategies. Your goal is to:
+1. Compute all relevant performance metrics from the trade data
+2. Identify patterns that cause losses or missed opportunities
+3. Suggest specific parameter changes (SL distance, TP distance, entry filters, leverage adjustments)
+4. Flag any signs of overfitting or unrealistic assumptions
+5. Provide a clear action plan for tuning
+
+# ASSUMPTIONS (IMPORTANT)
+Since this is backtest data (simulated), please assume:
+- **Slippage**: Add 0.1% to entry price AND 0.1% to exit price (SL or TP)
+- **Funding fees**: Include estimated funding cost (~0.01% per 8h if holding overnight)
+- **Maker/Taker fees**: Use 0.04% / 0.06% (typical for Bybit futures)
+- **No partial fills**: Assume full position filled
+- **Hold time limit**: If trade doesn't hit TP or SL within max hold period, square off at end price
+
+# DATA FORMAT
+The data structure:
+| Date | Entry Time | Exit Time | Entry Price | Exit Price | SL | TP | Result | PnL % | PnL $ | Score | Reason | Hold Hours |
+
+# ANALYSIS REQUIRED
+
+## 1. BASIC PERFORMANCE METRICS
+- Total trades
+- Win rate (%) – TP hit before SL
+- Loss rate (%) – SL hit before TP
+- Break-even / expiry square-off rate (%)
+- Average win ($)
+- Average loss ($)
+- Profit factor (gross profit / gross loss)
+- Net P&L ($) after fees & slippage
+- Expectancy per trade ($)
+- Maximum consecutive wins / losses
+- Maximum drawdown (%)
+
+## 2. RISK-REWARD REALITY CHECK
+- Compare targeted RR (e.g., 2:1 for 2% TP vs 1% SL with 3x leverage) with **realized RR**
+- If realized RR < 1.5, explain why (slippage? fees? early exits?)
+
+## 3. SL & TP HIT ANALYSIS
+For each trade:
+- Did price hit SL first? TP first? Neither?
+- For losing trades: what was **max favorable excursion (MFE)** before hitting SL?
+- For winning trades: what was **max adverse excursion (MAE)** before hitting TP?
+- Analyze hold duration patterns
+
+## 4. TEMPORAL PATTERNS (CRITICAL)
+Group trades by:
+- **Hour of entry** (00:00-04:00, 04:00-08:00, 08:00-12:00, 12:00-16:00, 16:00-20:00, 20:00-24:00 UTC). Compute win rate & avg P&L per hour.
+- **Day of week** (UTC days). Identify any day with lower win rate.
+- **Market condition**: Infer from BTC daily range - Low Volatility (<1%), Normal (1-2%), High (>2%). Compute performance per bucket.
+
+## 5. SCORE THRESHOLD ANALYSIS
+- Analyze win rate by score range: 60-65, 65-70, 70-75, 75-80, 80+
+- Find optimal score threshold that maximizes profit factor
+
+## 6. SIGNAL REASON ANALYSIS
+- Which indicator combinations (RSI, MACD, EMA, BB, Volume) produce best win rates?
+- Identify which reasons lead to losses
+
+## 7. HOLD DURATION ANALYSIS
+- How long do winning trades take to hit TP vs losing trades?
+- Is there an optimal hold time after which performance drops?
+
+## 8. SENSITIVITY ANALYSIS
+- If I increase SL from 0.5% to 0.7%, how does win rate change?
+- If I increase TP from 2% to 2.5%, how does hit rate change?
+- If I use 2x leverage instead of 3x, how does max drawdown change?
+
+## 9. ACTIONABLE RECOMMENDATIONS
+Provide prioritized list:
+- Adjust SL distance
+- Adjust TP distance  
+- Add time filters (avoid certain hours)
+- Add score threshold
+- Adjust leverage
+- Position sizing rule
+
+## 10. GO / NO-GO
+- ✅ **READY FOR PAPER TRADING** (if profit factor > 1.2 after costs, max drawdown < 20%)
+- ⚠️ **NEEDS TUNING** (top 2-3 issues)
+- ❌ **NOT VIABLE** (if profit factor < 1.0 or win rate < 35%)
+
+# OUTPUT FORMAT
+Present in clear sections with bullet points and tables. Use **bold** for key numbers. End with **executive summary**.
+
+# DATA FOLLOWS BELOW
+[PASTE YOUR BACKTEST DATA HERE]
