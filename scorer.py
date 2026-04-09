@@ -58,7 +58,7 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
         score += 10
         reasons.append("ADX_trending")
 
-    if latest['VOL_SMA_20'] > 0 and latest['volume'] > 1.3 * latest['VOL_SMA_20']:
+    if latest['VOL_SMA_20'] > 0 and latest['volume'] > 1.15 * latest['VOL_SMA_20']:
         score += 10
         reasons.append("volume_spike")
     else:
