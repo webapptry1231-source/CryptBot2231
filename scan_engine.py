@@ -81,8 +81,6 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if "low_volume" in reason:
                 continue
             
-            logger.info(f"Candle {i}: score={score}, reason={reason}")
-            
             last_signal = last_signal_time.get(symbol)
             if last_signal and (entry_time - last_signal).total_seconds() < (SIGNAL_COOLDOWN_HOURS * 3600):
                 continue
@@ -113,10 +111,6 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             mfe_pct = ((mfe - entry_price) / entry_price) * 100
             mae_pct = ((entry_price - mae) / entry_price) * 100
             
-            exit_price = future.iloc[-1]['close']
-            exit_time = future.index[-1]
-            hold_hours = (exit_time - entry_time).total_seconds() / 3600
-            
             sl_percent = SL_OVERRIDES.get(symbol, SL_PERCENT)
             tp_price = entry_price * (1 + TP_PERCENT/100)
             sl_price = entry_price * (1 - sl_percent/100)
@@ -126,6 +120,12 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             trailing_sl = sl_price
             running_high = entry_price
             trade_closed = False
+            exit_price = None
+            exit_time = None
+            pnl_pct = 0
+            result = "PENDING"
+            
+            for j in range(len(future)):
             
             for j in range(len(future)):
                 candle = future.iloc[j]
@@ -162,12 +162,17 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                     break
             
             if not trade_closed:
+                if exit_price is None:
+                    exit_price = future.iloc[-1]['close']
+                    exit_time = future.index[-1]
                 if exit_price > entry_price:
                     pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
                     result = "PROFIT"
                 else:
                     pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
                     result = "LOSS"
+            
+            hold_hours = (exit_time - entry_time).total_seconds() / 3600
             
             open_positions.discard(symbol)
             total_concurrent = max(0, total_concurrent - 1)
