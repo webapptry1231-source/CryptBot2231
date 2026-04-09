@@ -39,14 +39,10 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if score < WEAK_SIGNAL_THRESHOLD:
                 continue
             
-            signals_found += 1
+            # No more BB_lower_touch filter - trade ALL signals >= 60
             
             day_date = str(window.index[-1])[:10]
-            if day_date not in trades_per_day:
-                trades_per_day[day_date] = 0
-            if trades_per_day[day_date] >= MAX_OPEN_TRADES:
-                continue
-            trades_per_day[day_date] += 1
+            # No per-day limit - trade all signals
             
             entry_price = window.iloc[-1]['close']
             entry_time = window.index[-1]
