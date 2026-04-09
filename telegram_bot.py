@@ -54,6 +54,10 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if score < WEAK_SIGNAL_THRESHOLD:
                 continue
             
+            has_bb_touch = "BB_lower_touch" in reason
+            if not has_bb_touch:
+                continue
+            
             day_date = str(window.index[-1])[:10]
             if day_date not in trades_per_day:
                 trades_per_day[day_date] = 0
