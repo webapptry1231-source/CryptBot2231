@@ -104,6 +104,7 @@ async def run_historical_scan(send_func):
             msg += f"📌 {r['entry']} → {r['exit']}\n"
             msg += f"🛑 SL:{r['sl']} | 🎯 TP:{r['tp']}\n"
             msg += f"📦 ${notional} | Qty:{qty:.4f} BTC | Hold:{r['hold_hours']}h\n"
+            msg += f"📈 MFE:{r.get('mfe_pct', 0)}% | MAE:{r.get('mae_pct', 0)}%\n"
             msg += f"💵 PnL: ${r['pnl_usd_after_fee']:.2f} ({r['pnl_after_fee']:.2f}%) | {r['result']}\n"
             msg += f"📊 Score:{r['score']} | {r['reason']}\n"
             msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
