@@ -10,14 +10,22 @@ MAX_OPEN_TRADES = 3
 
 def scan_daily_historical(symbol: str, days: int) -> list:
     try:
+        logger.info(f"Fetching {days} days of historical data for {symbol}")
         df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
+        logger.info(f"Fetched {len(df)} candles")
         df = compute_indicators(df)
         
         results = []
-        days_checked = min(days, len(df) - MAX_HOLD_CANDLES)
-        trades_per_day = {}
+        total_candles = len(df)
+        days_checked = min(days, total_candles - MAX_HOLD_CANDLES)
+        logger.info(f"Total candles: {total_candles}, days_checked: {days_checked}, max_hold: {MAX_HOLD_CANDLES}")
         
-        for i in range(24, len(df) - MAX_HOLD_CANDLES):
+        trades_per_day = {}
+        total_scanned = 0
+        signals_found = 0
+        
+        for i in range(24, total_candles - MAX_HOLD_CANDLES):
+            total_scanned += 1
             day_idx = i // 24
             if day_idx >= days_checked:
                 break
@@ -30,6 +38,8 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             
             if score < WEAK_SIGNAL_THRESHOLD:
                 continue
+            
+            signals_found += 1
             
             day_date = str(window.index[-1])[:10]
             if day_date not in trades_per_day:
@@ -118,7 +128,10 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 "hold_hours": round(hold_hours, 1)
             })
         
+        logger.info(f"Scan complete: scanned {total_scanned} candles, found {signals_found} signals, generated {len(results)} trades")
         return results
     except Exception as e:
         logger.error(f"Error in daily scan: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return []
