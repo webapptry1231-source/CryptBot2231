@@ -8,7 +8,9 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df.ta.macd(fast=12, slow=26, signal=9, append=True)
     df.ta.ema(length=50, append=True)
     df.ta.ema(length=200, append=True)
-    df.ta.bbands(length=20, std=2.0, append=True)
+    
+    bbands = df.ta.bbands(length=20, std=2.0)
+    df = pd.concat([df, bbands], axis=1)
 
     df['VOL_SMA_20'] = df['volume'].rolling(window=20).mean()
 
