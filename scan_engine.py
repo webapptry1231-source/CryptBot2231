@@ -30,7 +30,12 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
         logger.info(f"Fetched {len(df)} candles")
         
+        if len(df) < 100:
+            logger.warning(f"Not enough candles: {len(df)}")
+            return []
+        
         df = compute_indicators(df)
+        logger.info(f"Indicators computed, {len(df)} rows")
         
         results = []
         total_candles = len(df)
@@ -75,6 +80,8 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             
             if "low_volume" in reason:
                 continue
+            
+            logger.info(f"Candle {i}: score={score}, reason={reason}")
             
             last_signal = last_signal_time.get(symbol)
             if last_signal and (entry_time - last_signal).total_seconds() < (SIGNAL_COOLDOWN_HOURS * 3600):
