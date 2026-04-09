@@ -2,10 +2,11 @@ import logging
 from data_fetcher import fetch_historical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
-from config import (TIMEFRAME, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD, 
-                   TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT, MAX_OPEN_TRADES)
+from config import (TIMEFRAME, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD,
+                   TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT)
 
 logger = logging.getLogger(__name__)
+MAX_OPEN_TRADES = 3
 
 def scan_daily_historical(symbol: str, days: int) -> list:
     try:
