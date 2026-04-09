@@ -6,7 +6,7 @@ from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
                     TIMEFRAME, CANDLES_NEEDED, SCAN_INTERVAL_SECONDS, SIMULATION_MODE,
                     STRONG_SIGNAL_THRESHOLD, WEAK_SIGNAL_THRESHOLD,
                     HISTORIC_MODE, LIVE_MODE, HYBRID_MODE, HISTORICAL_DAYS, LEVERAGE,
-                    TP_PERCENT, SL_PERCENT, FEE_PERCENT)
+                    TP_PERCENT, SL_PERCENT, FEE_PERCENT, BUY_AMOUNT)
 from data_fetcher import fetch_ohlcv, fetch_historical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
@@ -79,6 +79,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             fee = (TP_PERCENT + SL_PERCENT) / 2 * LEVERAGE * 0.001
             pnl_after_fee = pnl_pct - fee
             
+            pnl_usd = (BUY_AMOUNT * LEVERAGE) * (pnl_pct / 100)
+            pnl_usd_after_fee = (BUY_AMOUNT * LEVERAGE) * (pnl_after_fee / 100)
+            
             day_date = str(window.index[-1])[:10]
             results.append({
                 "date": day_date,
@@ -91,7 +94,10 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 "result": result,
                 "pnl_pct": round(pnl_pct, 2),
                 "pnl_after_fee": round(pnl_after_fee, 2),
-                "leverage": LEVERAGE
+                "pnl_usd": round(pnl_usd, 2),
+                "pnl_usd_after_fee": round(pnl_usd_after_fee, 2),
+                "leverage": LEVERAGE,
+                "buy_amount": BUY_AMOUNT
             })
         
         return results
@@ -101,7 +107,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
 
 def calculate_summary(results: list) -> dict:
     if not results:
-        return {"total": 0, "tp": 0, "sl": 0, "profit": 0, "loss": 0, "win_rate": 0, "total_pnl": 0}
+        return {"total": 0, "tp": 0, "sl": 0, "profit": 0, "loss": 0, "win_rate": 0, "total_pnl": 0, "total_pnl_usd": 0}
     
     tp = sum(1 for r in results if r['result'] == "TP HIT")
     sl = sum(1 for r in results if r['result'] == "SL HIT")
@@ -110,6 +116,8 @@ def calculate_summary(results: list) -> dict:
     wins = tp + profit
     total = len(results)
     
+    total_pnl_usd = sum(r['pnl_usd'] for r in results)
+    
     return {
         "total": total,
         "tp": tp,
@@ -117,12 +125,13 @@ def calculate_summary(results: list) -> dict:
         "profit": profit,
         "loss": loss,
         "win_rate": round((wins / total) * 100, 1) if total > 0 else 0,
-        "total_pnl": round(sum(r['pnl_after_fee'] for r in results), 2)
+        "total_pnl": round(sum(r['pnl_after_fee'] for r in results), 2),
+        "total_pnl_usd": round(total_pnl_usd, 2)
     }
 
 async def run_historical_scan(send_func):
     logger.info(f"Starting HISTORICAL scan for {HISTORICAL_DAYS} days...")
-    await send_func(f"📊 Starting Historical Scan\n🔄 {HISTORICAL_DAYS} days, {LEVERAGE}x leverage")
+    await send_func(f"📊 Starting Historical Scan\n🔄 {HISTORICAL_DAYS} days, {LEVERAGE}x, ${BUY_AMOUNT}")
     
     symbol = COINS[0]
     results = scan_daily_historical(symbol, HISTORICAL_DAYS)
@@ -133,22 +142,37 @@ async def run_historical_scan(send_func):
     
     summary = calculate_summary(results)
     
-    msg = f"📊 BTC DAILY SCAN RESULTS ({HISTORICAL_DAYS} days)\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"📈 Total Signals: {summary['total']}\n"
+    msg = f"📊 BTC DAILY BACKTEST ({HISTORICAL_DAYS} days)\n"
+    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += f"💰 Buy Amount: ${BUY_AMOUNT} × {LEVERAGE}x = ${BUY_AMOUNT * LEVERAGE}\n"
+    msg += f"📈 Total Trades: {summary['total']}\n"
     msg += f"✅ TP Hit: {summary['tp']} | ❌ SL Hit: {summary['sl']}\n"
-    msg += f"💰 Profit: {summary['profit']} | 📉 Loss: {summary['loss']}\n"
+    msg += f"💵 Total PnL: {summary['total_pnl']:.2f}% | ${summary['total_pnl_usd']}\n"
     msg += f"🎯 Win Rate: {summary['win_rate']}%\n"
-    msg += f"💵 Total PnL: {summary['total_pnl']}%\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     
-    for r in results[-10:]:
-        emoji = "✅" if r['result'] in ["TP HIT", "PROFIT"] else "❌"
-        msg += f"{emoji} {r['date']} | Score:{r['score']} | Entry:{r['entry']} → Exit:{r['exit']}\n"
-        msg += f"   PnL:{r['pnl_after_fee']}% | {r['result']}\n"
+    daily_pnl = {}
+    for r in results:
+        if r['date'] not in daily_pnl:
+            daily_pnl[r['date']] = {"count": 0, "pnl": 0}
+        daily_pnl[r['date']]["count"] += 1
+        daily_pnl[r['date']]["pnl"] += r['pnl_usd_after_fee']
+    
+    for date, data in sorted(daily_pnl.items(), reverse=True)[:15]:
+        emoji = "✅" if data['pnl'] > 0 else "❌"
+        msg += f"{emoji} {date}: {data['count']} trades | PnL: ${data['pnl']:.2f}\n"
+    
+    msg += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += f"📋 LAST 20 TRADES:\n"
+    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    
+    for r in results[-20:]:
+        emoji = "✅" if r['pnl_usd_after_fee'] > 0 else "❌"
+        msg += f"{emoji} {r['date']} | ${r['buy_amount']}×{r['leverage']}x | Entry:{r['entry']}\n"
+        msg += f"   → Exit:{r['exit']} | {r['result']} | PnL:${r['pnl_usd_after_fee']:.2f}\n"
     
     await send_func(msg)
-    logger.info(f"Historical scan complete: {summary['total']} days scanned, PnL: {summary['total_pnl']}%")
+    logger.info(f"Historical scan complete: {summary['total']} trades, PnL: ${summary['total_pnl_usd']}")
 
 async def run_live_scan(send_func) -> list[str]:
     messages = []

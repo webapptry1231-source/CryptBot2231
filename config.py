@@ -33,3 +33,4 @@ LIVE_MODE = os.getenv("LIVE_MODE", "false").lower() == "true"
 HYBRID_MODE = os.getenv("HYBRID_MODE", "false").lower() == "true"
 
 HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "30"))
+BUY_AMOUNT = float(os.getenv("BUY_AMOUNT", "50"))
