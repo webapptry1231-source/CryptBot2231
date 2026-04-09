@@ -28,6 +28,12 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['BBL_20_2'] = bbands[bb_lower_col]
         df['BBU_20_2'] = bbands[bb_upper_col]
 
+    adx_result = df.ta.adx(length=14)
+    if adx_result is not None:
+        df['ADX_14'] = adx_result['ADX_14']
+        df['DMP_14'] = adx_result['DMP_14']
+        df['DMN_14'] = adx_result['DMN_14']
+
     df['VOL_SMA_20'] = df['volume'].rolling(window=20).mean()
 
     df.dropna(inplace=True)

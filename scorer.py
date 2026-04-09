@@ -39,12 +39,24 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
         score += 8
         reasons.append("MACD_hist_positive")
 
+    bb_width = latest['BBU_20_2'] - latest['BBL_20_2']
+    prev_bb_width = prev['BBU_20_2'] - prev['BBL_20_2']
+    bb_expanding = bb_width > prev_bb_width
+    
     if latest['close'] <= latest['BBL_20_2']:
-        score += 15
-        reasons.append("BB_lower_touch")
+        if bb_expanding:
+            score += 15
+            reasons.append("BB_lower_touch_expanding")
+        else:
+            score += 5
+            reasons.append("BB_lower_touch_narrow")
     elif latest['close'] >= latest['BBU_20_2']:
         score -= 10
         reasons.append("BB_upper_penalty")
+
+    if latest['ADX_14'] > 25:
+        score += 10
+        reasons.append("ADX_trending")
 
     if latest['VOL_SMA_20'] > 0 and latest['volume'] > 1.3 * latest['VOL_SMA_20']:
         score += 10

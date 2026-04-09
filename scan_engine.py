@@ -5,7 +5,8 @@ from indicators import compute_indicators
 from scorer import calculate_score
 from config import (TIMEFRAME, TIMEFRAME_4H, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD,
                    TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT,
-                   DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END)
+                   DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
+                   SL_OVERRIDES)
 
 logger = logging.getLogger(__name__)
 MAX_OPEN_TRADES = 3
@@ -36,6 +37,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         
         trades_per_day = {}
         last_signal_time = {}
+        open_positions = set()
         total_scanned = 0
         signals_found = 0
         
@@ -44,6 +46,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             day_idx = i // 24
             if day_idx >= days_checked:
                 break
+            
+            if symbol in open_positions:
+                continue
             
             window = df.iloc[:i]
             if len(window) < 50:
@@ -81,18 +86,26 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             last_signal_time[symbol] = entry_time
             
             entry_price = window.iloc[-1]['close']
+            open_positions.add(symbol)
             
             hold_candles = min(MAX_HOLD_CANDLES, total_candles - i - 1)
             future = df.iloc[i:i+hold_candles]
             if len(future) == 0:
+                open_positions.discard(symbol)
                 continue
+            
+            mfe = future['high'].max()
+            mae = future['low'].min()
+            mfe_pct = ((mfe - entry_price) / entry_price) * 100
+            mae_pct = ((entry_price - mae) / entry_price) * 100
             
             exit_price = future.iloc[-1]['close']
             exit_time = future.index[-1]
             hold_hours = (exit_time - entry_time).total_seconds() / 3600
             
+            sl_percent = SL_OVERRIDES.get(symbol, SL_PERCENT)
             tp_price = entry_price * (1 + TP_PERCENT/100)
-            sl_price = entry_price * (1 - SL_PERCENT/100)
+            sl_price = entry_price * (1 - sl_percent/100)
             
             hit_tp_idx = None
             hit_sl_idx = None
@@ -128,6 +141,8 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
                 result = "LOSS"
             
+            open_positions.discard(symbol)
+            
             fee = (TP_PERCENT + SL_PERCENT) / 2 * LEVERAGE * 0.001
             pnl_after_fee = pnl_pct - fee
             
@@ -154,7 +169,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 "pnl_usd_after_fee": round(pnl_usd_after_fee, 2),
                 "leverage": LEVERAGE,
                 "buy_amount": BUY_AMOUNT,
-                "hold_hours": round(hold_hours, 1)
+                "hold_hours": round(hold_hours, 1),
+                "mfe_pct": round(mfe_pct, 2),
+                "mae_pct": round(mae_pct, 2)
             })
         
         logger.info(f"Scan complete: scanned {total_scanned} candles, found {signals_found} signals, generated {len(results)} trades")
