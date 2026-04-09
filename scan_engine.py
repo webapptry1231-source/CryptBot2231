@@ -98,7 +98,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             future = df.iloc[i:i+hold_candles]
             if len(future) == 0:
                 open_positions.discard(symbol)
-            total_concurrent = max(0, total_concurrent - 1)
+                total_concurrent = max(0, total_concurrent - 1)
                 continue
             
             mfe = future['high'].max()
