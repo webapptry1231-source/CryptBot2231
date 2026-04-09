@@ -95,7 +95,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 continue
             
             score, reason = calculate_score(window)
-            logger.info(f"  -> Score: {score}, Reason: {reason}")
+            
+            if score >= 70:
+                logger.info(f"Near-signal: score={score}, reason={reason}")
             
             if score < WEAK_SIGNAL_THRESHOLD:
                 logger.info(f"  -> Skip: score below threshold {WEAK_SIGNAL_THRESHOLD}")
@@ -122,6 +124,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             total_concurrent += 1
             
             entry_price = window.iloc[-1]['close']
+            entry_price = entry_price * 1.001
             open_positions.add(symbol)
             
             hold_candles = min(MAX_HOLD_CANDLES, total_candles - i - 1)
@@ -186,7 +189,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             
             if not trade_closed:
                 if exit_price is None:
-                    exit_price = future.iloc[-1]['close']
+                    exit_price = future.iloc[-1]['close'] * 0.999
                     exit_time = future.index[-1]
                 if exit_price > entry_price:
                     pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
