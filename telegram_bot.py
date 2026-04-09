@@ -6,17 +6,11 @@ from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
                     TIMEFRAME, CANDLES_NEEDED, SCAN_INTERVAL_SECONDS, SIMULATION_MODE,
                     STRONG_SIGNAL_THRESHOLD, WEAK_SIGNAL_THRESHOLD,
                     HISTORIC_MODE, LIVE_MODE, HYBRID_MODE, HISTORICAL_DAYS, LEVERAGE,
-                    TP_PERCENT, SL_PERCENT, FEE_PERCENT, BUY_AMOUNT)
+                    TP_PERCENT, SL_PERCENT, FEE_PERCENT, BUY_AMOUNT, MAX_HOLD_CANDLES)
 
 MAX_OPEN_TRADES = 3
-from data_fetcher import fetch_ohlcv, fetch_historical_ohlcv
-from indicators import compute_indicators
-from scorer import calculate_score
-from signal_formatter import format_signal_message
-from trade_logger import init_db, log_signal
-from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
-import pandas as pd
+from scan_engine import scan_daily_historical
+from data_fetcher import fetch_ohlcv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,7 +25,7 @@ def scan_coin(symbol: str) -> dict:
     except Exception as e:
         return {"symbol": symbol, "score": 0, "reason": "", "price": 0, "error": str(e)}
 
-def scan_daily_historical(symbol: str, days: int) -> list:
+from scan_engine import scan_daily_historical
     try:
         df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
         df = compute_indicators(df)
@@ -183,10 +177,10 @@ async def run_historical_scan(send_func):
             emoji = "✅" if r['pnl_usd_after_fee'] > 0 else "❌"
             notional = r['buy_amount'] * r['leverage']
             qty = notional / r['entry']
-            msg += f"{emoji} {r['date']} {r['time']}\n"
+            msg += f"{emoji} {r['date']} {r['entry_time']} → {r['exit_time']}\n"
             msg += f"📌 {r['entry']} → {r['exit']}\n"
             msg += f"🛑 SL:{r['sl']} | 🎯 TP:{r['tp']}\n"
-            msg += f"📦 ${notional} | Qty:{qty:.4f} BTC\n"
+            msg += f"📦 ${notional} | Qty:{qty:.4f} BTC | Hold:{r['hold_hours']}h\n"
             msg += f"💵 PnL: ${r['pnl_usd_after_fee']:.2f} ({r['pnl_after_fee']:.2f}%) | {r['result']}\n"
             msg += f"📊 Score:{r['score']} | {r['reason']}\n"
             msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
