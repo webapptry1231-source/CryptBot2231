@@ -9,8 +9,13 @@ from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
                     TP_PERCENT, SL_PERCENT, FEE_PERCENT, BUY_AMOUNT, MAX_HOLD_CANDLES)
 
 MAX_OPEN_TRADES = 3
-from scan_engine import scan_daily_historical
 from data_fetcher import fetch_ohlcv
+from scan_engine import scan_daily_historical
+from signal_formatter import format_signal_message
+from trade_logger import init_db, log_signal
+from concurrent.futures import ThreadPoolExecutor
+from indicators import compute_indicators
+from scorer import calculate_score
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,101 +30,6 @@ def scan_coin(symbol: str) -> dict:
     except Exception as e:
         return {"symbol": symbol, "score": 0, "reason": "", "price": 0, "error": str(e)}
 
-from scan_engine import scan_daily_historical
-    try:
-        df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
-        df = compute_indicators(df)
-        
-        results = []
-        days_checked = min(days, len(df) - 24)
-        trades_per_day = {}
-        
-        for i in range(24, len(df) - 24):
-            day_idx = i // 24
-            if day_idx >= days_checked:
-                break
-            
-            window = df.iloc[:i]
-            if len(window) < 50:
-                continue
-                
-            score, reason = calculate_score(window)
-            
-            if score < WEAK_SIGNAL_THRESHOLD:
-                continue
-            
-            has_bb_touch = "BB_lower_touch" in reason
-            if not has_bb_touch:
-                continue
-            
-            day_date = str(window.index[-1])[:10]
-            if day_date not in trades_per_day:
-                trades_per_day[day_date] = 0
-            if trades_per_day[day_date] >= MAX_OPEN_TRADES:
-                continue
-            trades_per_day[day_date] += 1
-            
-            entry_price = window.iloc[-1]['close']
-            entry_time = window.index[-1]
-            
-            future = df.iloc[i:i+24]
-            if len(future) == 0:
-                continue
-                
-            high_24h = future['high'].max()
-            low_24h = future['low'].min()
-            close_24h = future.iloc[-1]['close']
-            
-            tp_price = entry_price * (1 + TP_PERCENT/100)
-            sl_price = entry_price * (1 - SL_PERCENT/100)
-            
-            hit_tp = high_24h >= tp_price
-            hit_sl = low_24h <= sl_price
-            
-            if hit_tp and not hit_sl:
-                pnl_pct = TP_PERCENT
-                result = "TP HIT"
-            elif hit_sl and not hit_tp:
-                pnl_pct = -SL_PERCENT
-                result = "SL HIT"
-            elif close_24h > entry_price:
-                pnl_pct = ((close_24h - entry_price) / entry_price) * 100 * LEVERAGE
-                result = "PROFIT"
-            else:
-                pnl_pct = ((close_24h - entry_price) / entry_price) * 100 * LEVERAGE
-                result = "LOSS"
-            
-            fee = (TP_PERCENT + SL_PERCENT) / 2 * LEVERAGE * 0.001
-            pnl_after_fee = pnl_pct - fee
-            
-            pnl_usd = (BUY_AMOUNT * LEVERAGE) * (pnl_pct / 100)
-            pnl_usd_after_fee = (BUY_AMOUNT * LEVERAGE) * (pnl_after_fee / 100)
-            
-            day_date = str(entry_time)[:10]
-            entry_time_str = str(entry_time)[11:16]
-            results.append({
-                "date": day_date,
-                "time": entry_time_str,
-                "score": score,
-                "reason": reason,
-                "entry": round(entry_price, 2),
-                "exit": round(close_24h, 2),
-                "tp": round(tp_price, 2),
-                "sl": round(sl_price, 2),
-                "result": result,
-                "pnl_pct": round(pnl_pct, 2),
-                "pnl_after_fee": round(pnl_after_fee, 2),
-                "pnl_usd": round(pnl_usd, 2),
-                "pnl_usd_after_fee": round(pnl_usd_after_fee, 2),
-                "leverage": LEVERAGE,
-                "buy_amount": BUY_AMOUNT
-            })
-        
-        return results
-    except Exception as e:
-        logger.error(f"Error in daily scan: {e}")
-        return []
-
 def calculate_summary(results: list) -> dict:
     if not results:
         return {"total": 0, "tp": 0, "sl": 0, "profit": 0, "loss": 0, "win_rate": 0, "total_pnl": 0, "total_pnl_usd": 0}
@@ -131,7 +41,7 @@ def calculate_summary(results: list) -> dict:
     wins = tp + profit
     total = len(results)
     
-    total_pnl_usd = sum(r['pnl_usd'] for r in results)
+    total_pnl_usd = sum(r['pnl_usd_after_fee'] for r in results)
     
     return {
         "total": total,
@@ -169,7 +79,7 @@ async def run_historical_scan(send_func):
     
     await send_func(msg)
     
-    chunk_size = 15
+    chunk_size = 10
     for i in range(0, len(results), chunk_size):
         chunk = results[i:i+chunk_size]
         msg = ""
@@ -186,7 +96,6 @@ async def run_historical_scan(send_func):
             msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         await send_func(msg)
     
-    logger.info(f"Historical scan complete: {summary['total']} trades, PnL: ${summary['total_pnl_usd']}")
     logger.info(f"Historical scan complete: {summary['total']} trades, PnL: ${summary['total_pnl_usd']}")
 
 async def run_live_scan(send_func) -> list[str]:
@@ -235,6 +144,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Type: {mode_str}\n"
         f"Leverage: {LEVERAGE}x\n"
         f"Historical Days: {HISTORICAL_DAYS}\n"
+        f"Max Hold: {MAX_HOLD_CANDLES * 15 // 60}h\n"
         f"Coins: {COINS}"
     )
 
@@ -279,7 +189,7 @@ def main():
     if not HISTORIC_MODE:
         app.job_queue.run_repeating(scheduled_scan, interval=SCAN_INTERVAL_SECONDS, first=10)
     
-    logger.info(f"Bot started. Historic:{HISTORIC_MODE}, Live:{LIVE_MODE}, Hybrid:{HYBRID_MODE}, Days:{HISTORICAL_DAYS}, Leverage:{LEVERAGE}x")
+    logger.info(f"Bot started. Historic:{HISTORIC_MODE}, Live:{LIVE_MODE}, Hybrid:{HYBRID_MODE}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
