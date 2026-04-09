@@ -21,7 +21,7 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if ema200 is not None:
         df['EMA_200'] = ema200
     
-    bbands = df.ta.bbands(length=20, std=2.0)
+    bbands = df.ta.bbands(length=20, std=2)
     if bbands is not None:
         for col in bbands.columns:
             df[col] = bbands[col]

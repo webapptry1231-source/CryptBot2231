@@ -36,10 +36,10 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
         score += 8
         reasons.append("MACD_hist_positive")
 
-    if latest['close'] <= latest['BBL_20_2.0']:
+    if latest['close'] <= latest['BBL_20_2']:
         score += 15
         reasons.append("BB_lower_touch")
-    elif latest['close'] >= latest['BBU_20_2.0']:
+    elif latest['close'] >= latest['BBU_20_2']:
         score -= 10
         reasons.append("BB_upper_penalty")
 
