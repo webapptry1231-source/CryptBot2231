@@ -232,6 +232,10 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             })
         
         logger.info(f"Scan complete: scanned {total_scanned} candles, found {signals_found} signals, generated {len(results)} trades")
+        
+        for r in results:
+            logger.info(f"TRADE: {r}")
+        
         return results
     except Exception as e:
         logger.error(f"Error in daily scan: {e}")
