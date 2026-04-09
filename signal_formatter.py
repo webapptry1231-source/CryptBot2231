@@ -15,7 +15,7 @@ def format_signal_message(symbol: str, score: int, reason: str, price: float) ->
     else:
         return None
 
-    tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol.replace('/', '')}"
+    tv_link = f"https://www.tradingview.com/chart/?symbol=BYBIT:{symbol.replace('/', '')}"
 
     return (
         f"{emoji} {symbol} (15m Futures)\n"
