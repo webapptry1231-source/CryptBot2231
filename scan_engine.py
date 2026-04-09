@@ -70,12 +70,14 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             hit_tp_idx = None
             hit_sl_idx = None
             
-            for j, candle in enumerate(future):
+            for j in range(len(future)):
+                candle = future.iloc[j]
                 if candle['high'] >= tp_price:
                     hit_tp_idx = j
                     break
             
-            for j, candle in enumerate(future):
+            for j in range(len(future)):
+                candle = future.iloc[j]
                 if candle['low'] <= sl_price:
                     hit_sl_idx = j
                     break
