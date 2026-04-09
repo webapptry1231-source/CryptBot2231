@@ -23,8 +23,10 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     
     bbands = df.ta.bbands(length=20, std=2)
     if bbands is not None:
-        for col in bbands.columns:
-            df[col] = bbands[col]
+        bb_lower_col = [c for c in bbands.columns if c.startswith('BBL')][0]
+        bb_upper_col = [c for c in bbands.columns if c.startswith('BBU')][0]
+        df['BBL_20_2'] = bbands[bb_lower_col]
+        df['BBU_20_2'] = bbands[bb_upper_col]
 
     df['VOL_SMA_20'] = df['volume'].rolling(window=20).mean()
 
