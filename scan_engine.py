@@ -1,26 +1,41 @@
 import logging
+from datetime import datetime, timedelta
 from data_fetcher import fetch_historical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
-from config import (TIMEFRAME, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD,
-                   TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT)
+from config import (TIMEFRAME, TIMEFRAME_4H, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD,
+                   TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT,
+                   DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END)
 
 logger = logging.getLogger(__name__)
 MAX_OPEN_TRADES = 3
+
+def check_4h_trend(symbol: str) -> bool:
+    try:
+        df_4h = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME_4H, days_back=7)
+        if len(df_4h) < 200:
+            return True
+        df_4h = compute_indicators(df_4h)
+        latest = df_4h.iloc[-1]
+        return latest['close'] > latest['EMA_200']
+    except Exception as e:
+        logger.warning(f"4h trend check failed: {e}")
+        return True
 
 def scan_daily_historical(symbol: str, days: int) -> list:
     try:
         logger.info(f"Fetching {days} days of historical data for {symbol}")
         df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
         logger.info(f"Fetched {len(df)} candles")
+        
         df = compute_indicators(df)
         
         results = []
         total_candles = len(df)
         days_checked = min(days, total_candles - MAX_HOLD_CANDLES)
-        logger.info(f"Total candles: {total_candles}, days_checked: {days_checked}, max_hold: {MAX_HOLD_CANDLES}")
         
         trades_per_day = {}
+        last_signal_time = {}
         total_scanned = 0
         signals_found = 0
         
@@ -33,27 +48,45 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             window = df.iloc[:i]
             if len(window) < 50:
                 continue
-                
+            
+            entry_time = window.index[-1]
+            entry_hour = entry_time.hour
+            
+            if entry_hour < TRADE_HOURS_START or entry_hour >= TRADE_HOURS_END:
+                continue
+            
+            if not check_4h_trend(symbol):
+                continue
+            
             score, reason = calculate_score(window)
             
             if score < WEAK_SIGNAL_THRESHOLD:
                 continue
             
-            # No more BB_lower_touch filter - trade ALL signals >= 60
+            if "low_volume" in reason:
+                continue
             
-            day_date = str(window.index[-1])[:10]
-            # No per-day limit - trade all signals
+            last_signal = last_signal_time.get(symbol)
+            if last_signal and (entry_time - last_signal).total_seconds() < (SIGNAL_COOLDOWN_HOURS * 3600):
+                continue
+            
+            day_date = str(entry_time)[:10]
+            if day_date not in trades_per_day:
+                trades_per_day[day_date] = 0
+            if trades_per_day[day_date] >= DAILY_TRADE_CAP:
+                continue
+            trades_per_day[day_date] += 1
+            
+            signals_found += 1
+            last_signal_time[symbol] = entry_time
             
             entry_price = window.iloc[-1]['close']
-            entry_time = window.index[-1]
             
-            hold_candles = min(MAX_HOLD_CANDLES, len(df) - i - 1)
+            hold_candles = min(MAX_HOLD_CANDLES, total_candles - i - 1)
             future = df.iloc[i:i+hold_candles]
             if len(future) == 0:
                 continue
             
-            high_hold = future['high'].max()
-            low_hold = future['low'].min()
             exit_price = future.iloc[-1]['close']
             exit_time = future.index[-1]
             hold_hours = (exit_time - entry_time).total_seconds() / 3600
@@ -61,8 +94,6 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             tp_price = entry_price * (1 + TP_PERCENT/100)
             sl_price = entry_price * (1 - SL_PERCENT/100)
             
-            hit_tp = high_hold >= tp_price
-            hit_sl = low_hold <= sl_price
             hit_tp_idx = None
             hit_sl_idx = None
             

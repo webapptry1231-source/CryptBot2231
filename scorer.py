@@ -19,18 +19,21 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
 
     rsi = latest['RSI_14']
     if rsi < 30:
-        score += 20
-        reasons.append("RSI_oversold")
-    elif rsi < 45:
+        score += 5
+        reasons.append("RSI_oversold_warning")
+    elif 30 <= rsi < 45:
         score += 10
         reasons.append("RSI_recovering")
+    elif rsi >= 45 and rsi < 65:
+        score += 5
+        reasons.append("RSI_neutral")
 
     macd_cross = (
         prev['MACD_12_26_9'] <= prev['MACDs_12_26_9'] and
         latest['MACD_12_26_9'] > latest['MACDs_12_26_9']
     )
     if macd_cross:
-        score += 15
+        score += 5
         reasons.append("MACD_crossover")
     elif latest['MACDh_12_26_9'] > 0 and prev['MACDh_12_26_9'] <= 0:
         score += 8
@@ -43,9 +46,11 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
         score -= 10
         reasons.append("BB_upper_penalty")
 
-    if latest['VOL_SMA_20'] > 0 and latest['volume'] > 1.5 * latest['VOL_SMA_20']:
+    if latest['VOL_SMA_20'] > 0 and latest['volume'] > 1.3 * latest['VOL_SMA_20']:
         score += 10
         reasons.append("volume_spike")
+    else:
+        return 0, "low_volume"
 
     score = max(0, min(100, score))
     reason_str = " + ".join(reasons) if reasons else "no_signal"

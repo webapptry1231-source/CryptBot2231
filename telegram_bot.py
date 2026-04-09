@@ -10,21 +10,34 @@ from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
 
 MAX_OPEN_TRADES = 3
 from data_fetcher import fetch_ohlcv
-from scan_engine import scan_daily_historical
+from scan_engine import scan_daily_historical, check_4h_trend
 from signal_formatter import format_signal_message
 from trade_logger import init_db, log_signal
 from concurrent.futures import ThreadPoolExecutor
 from indicators import compute_indicators
 from scorer import calculate_score
+from config import (TRADE_HOURS_START, TRADE_HOURS_END)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def scan_coin(symbol: str) -> dict:
     try:
+        from datetime import datetime
+        current_hour = datetime.utcnow().hour
+        if current_hour < TRADE_HOURS_START or current_hour >= TRADE_HOURS_END:
+            return {"symbol": symbol, "score": 0, "reason": "outside_trade_hours", "price": 0, "error": None}
+        
+        if not check_4h_trend(symbol):
+            return {"symbol": symbol, "score": 0, "reason": "4h_bearish", "price": 0, "error": None}
+        
         df = fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=CANDLES_NEEDED)
         df = compute_indicators(df)
         score, reason = calculate_score(df)
+        
+        if score < WEAK_SIGNAL_THRESHOLD or "low_volume" in reason:
+            return {"symbol": symbol, "score": 0, "reason": reason, "price": 0, "error": None}
+        
         price = df.iloc[-1]['close']
         return {"symbol": symbol, "score": score, "reason": reason, "price": price, "error": None}
     except Exception as e:
