@@ -81,6 +81,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if "low_volume" in reason:
                 continue
             
+            entry_time = window.index[-1]
+            entry_hour = entry_time.hour
+            
             last_signal = last_signal_time.get(symbol)
             if last_signal and (entry_time - last_signal).total_seconds() < (SIGNAL_COOLDOWN_HOURS * 3600):
                 continue
