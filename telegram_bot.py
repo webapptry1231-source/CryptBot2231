@@ -83,8 +83,10 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             pnl_usd_after_fee = (BUY_AMOUNT * LEVERAGE) * (pnl_after_fee / 100)
             
             day_date = str(window.index[-1])[:10]
+            entry_time = str(window.index[-1])[11:16]
             results.append({
                 "date": day_date,
+                "time": entry_time,
                 "score": score,
                 "reason": reason,
                 "entry": round(entry_price, 2),
@@ -168,7 +170,7 @@ async def run_historical_scan(send_func):
     
     for r in results[-20:]:
         emoji = "✅" if r['pnl_usd_after_fee'] > 0 else "❌"
-        msg += f"{emoji} {r['date']} | ${r['buy_amount']}×{r['leverage']}x | Entry:{r['entry']}\n"
+        msg += f"{emoji} {r['date']} {r['time']} | ${r['buy_amount']}×{r['leverage']}x | Entry:{r['entry']}\n"
         msg += f"   → Exit:{r['exit']} | {r['result']} | PnL:${r['pnl_usd_after_fee']:.2f}\n"
     
     await send_func(msg)
