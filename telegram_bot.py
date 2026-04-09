@@ -7,6 +7,8 @@ from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
                     STRONG_SIGNAL_THRESHOLD, WEAK_SIGNAL_THRESHOLD,
                     HISTORIC_MODE, LIVE_MODE, HYBRID_MODE, HISTORICAL_DAYS, LEVERAGE,
                     TP_PERCENT, SL_PERCENT, FEE_PERCENT, BUY_AMOUNT)
+
+MAX_OPEN_TRADES = 3
 from data_fetcher import fetch_ohlcv, fetch_historical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
@@ -36,6 +38,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         
         results = []
         days_checked = min(days, len(df) - 24)
+        trades_per_day = {}
         
         for i in range(24, len(df) - 24):
             day_idx = i // 24
@@ -50,7 +53,16 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             
             if score < WEAK_SIGNAL_THRESHOLD:
                 continue
+            
+            day_date = str(window.index[-1])[:10]
+            if day_date not in trades_per_day:
+                trades_per_day[day_date] = 0
+            if trades_per_day[day_date] >= MAX_OPEN_TRADES:
+                continue
+            trades_per_day[day_date] += 1
+            
             entry_price = window.iloc[-1]['close']
+            entry_time = window.index[-1]
             
             future = df.iloc[i:i+24]
             if len(future) == 0:
@@ -85,11 +97,11 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             pnl_usd = (BUY_AMOUNT * LEVERAGE) * (pnl_pct / 100)
             pnl_usd_after_fee = (BUY_AMOUNT * LEVERAGE) * (pnl_after_fee / 100)
             
-            day_date = str(window.index[-1])[:10]
-            entry_time = str(window.index[-1])[11:16]
+            day_date = str(entry_time)[:10]
+            entry_time_str = str(entry_time)[11:16]
             results.append({
                 "date": day_date,
-                "time": entry_time,
+                "time": entry_time_str,
                 "score": score,
                 "reason": reason,
                 "entry": round(entry_price, 2),
