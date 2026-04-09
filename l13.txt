@@ -1,0 +1,4 @@
+What i need is,
+2 modes, 1 historical data testinf, 2live market testing.
+Workflow: Get data from relaible and free to use source->scan each coin according to our criteria dynamically (parallel processing )-> send signals and scan details to telegram ( do not need telegram to activate the scan, when we deploy it has to run automatically. We can change the modes with env) ask me any doubt you may have before proceeding, lets avoid all the hallucinations
+WE NEED TO BE MUCH MORE SYSTAATIC,Lets go with 1 coin only,BTC only,Get 30 days of data,scan each day,  send scan started message,pnl each day,with simulations,leverage and all

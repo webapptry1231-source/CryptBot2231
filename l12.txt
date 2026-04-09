@@ -1,0 +1,39 @@
+2026-04-09T20:17:23.914265817Z [inf]  Starting Container
+2026-04-09T20:17:24.641148282Z [err]  INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-09T20:17:24.641157113Z [err]  INFO:telegram_bot:Bot started. Polling for updates...
+2026-04-09T20:17:25.045913057Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getMe "HTTP/1.1 200 OK"
+2026-04-09T20:17:25.226892257Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/deleteWebhook "HTTP/1.1 200 OK"
+2026-04-09T20:17:25.226901429Z [err]  INFO:apscheduler.scheduler:Added job "scheduled_scan" to job store "default"
+2026-04-09T20:17:25.226907709Z [err]  INFO:apscheduler.scheduler:Scheduler started
+2026-04-09T20:17:25.226913042Z [err]  INFO:telegram.ext.Application:Application started
+2026-04-09T20:17:34.572004527Z [err]  INFO:apscheduler.executors.default:Running job "scheduled_scan (trigger: interval[0:15:00], next run at: 2026-04-09 20:32:34 UTC)" (scheduled at 2026-04-09 20:17:34.504054+00:00)
+2026-04-09T20:17:38.607380957Z [err]  INFO:telegram_bot:RESULT: BTC/USDT - score=40, reason=price>EMA200 + EMA50>EMA200, price=72236.7
+2026-04-09T20:17:38.607387054Z [err]  ERROR:telegram.ext.Application:No error handlers are registered, logging exception.
+2026-04-09T20:17:38.607392124Z [err]  Traceback (most recent call last):
+2026-04-09T20:17:38.607397448Z [err]    File "/app/.venv/lib/python3.13/site-packages/telegram/ext/_jobqueue.py", line 1010, in _run
+2026-04-09T20:17:38.607403121Z [err]      await self.callback(context)
+2026-04-09T20:17:38.607408739Z [err]    File "/app/telegram_bot.py", line 74, in scheduled_scan
+2026-04-09T20:17:38.607413638Z [err]      await scan_all_coins(send_to_chat)
+2026-04-09T20:17:38.607418719Z [err]    File "/app/telegram_bot.py", line 36, in scan_all_coins
+2026-04-09T20:17:38.607423642Z [err]      if score >= WEAK_SIGNAL_THRESHOLD:
+2026-04-09T20:17:38.607429213Z [err]                  ^^^^^^^^^^^^^^^^^^^^^
+2026-04-09T20:17:38.607434231Z [err]  NameError: name 'WEAK_SIGNAL_THRESHOLD' is not defined
+2026-04-09T20:17:38.607438671Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T20:17:38.607443136Z [err]  INFO:apscheduler.executors.default:Job "scheduled_scan (trigger: interval[0:15:00], next run at: 2026-04-09 20:32:34 UTC)" executed successfully
+2026-04-09T20:17:39.115023151Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/sendMessage "HTTP/1.1 200 OK"
+2026-04-09T20:17:39.115033795Z [err]  INFO:telegram_bot:RESULT: BTC/USDT - score=40, reason=price>EMA200 + EMA50>EMA200, price=72231.5
+2026-04-09T20:17:39.115040880Z [err]  ERROR:telegram.ext.Application:No error handlers are registered, logging exception.
+2026-04-09T20:17:39.115046540Z [err]  Traceback (most recent call last):
+2026-04-09T20:17:39.115051190Z [err]    File "/app/.venv/lib/python3.13/site-packages/telegram/ext/_application.py", line 1315, in process_update
+2026-04-09T20:17:39.115058920Z [err]      await coroutine
+2026-04-09T20:17:39.115063813Z [err]    File "/app/.venv/lib/python3.13/site-packages/telegram/ext/_handlers/basehandler.py", line 159, in handle_update
+2026-04-09T20:17:39.115068580Z [err]      return await self.callback(update, context)
+2026-04-09T20:17:39.115073574Z [err]             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-04-09T20:17:39.115079235Z [err]    File "/app/telegram_bot.py", line 56, in cmd_scan
+2026-04-09T20:17:39.115084019Z [err]      found = await scan_all_coins(reply)
+2026-04-09T20:17:39.115089240Z [err]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-04-09T20:17:39.115094091Z [err]    File "/app/telegram_bot.py", line 36, in scan_all_coins
+2026-04-09T20:17:39.115099733Z [err]      if score >= WEAK_SIGNAL_THRESHOLD:
+2026-04-09T20:17:39.115104769Z [err]                  ^^^^^^^^^^^^^^^^^^^^^
+2026-04-09T20:17:39.115109391Z [err]  NameError: name 'WEAK_SIGNAL_THRESHOLD' is not defined
+2026-04-09T20:17:48.663787609Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"

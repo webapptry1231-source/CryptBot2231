@@ -1,0 +1,22 @@
+2026-04-09T20:12:40.515972984Z [inf]  Starting Container
+2026-04-09T20:12:43.280270329Z [err]  INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-09T20:12:43.280276937Z [err]  INFO:telegram_bot:Bot started. Polling for updates...
+2026-04-09T20:12:43.280282390Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getMe "HTTP/1.1 200 OK"
+2026-04-09T20:12:43.362004840Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/deleteWebhook "HTTP/1.1 200 OK"
+2026-04-09T20:12:43.363569480Z [err]  INFO:apscheduler.scheduler:Added job "scheduled_scan" to job store "default"
+2026-04-09T20:12:43.363579445Z [err]  INFO:apscheduler.scheduler:Scheduler started
+2026-04-09T20:12:43.363587356Z [err]  INFO:telegram.ext.Application:Application started
+2026-04-09T20:12:53.344455882Z [err]  INFO:apscheduler.executors.default:Running job "scheduled_scan (trigger: interval[0:15:00], next run at: 2026-04-09 20:27:52 UTC)" (scheduled at 2026-04-09 20:12:52.707872+00:00)
+2026-04-09T20:12:58.360517490Z [err]  INFO:apscheduler.executors.default:Job "scheduled_scan (trigger: interval[0:15:00], next run at: 2026-04-09 20:27:52 UTC)" executed successfully
+2026-04-09T20:12:58.360524194Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T20:13:02.281633007Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T20:13:03.408048884Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/sendMessage "HTTP/1.1 200 OK"
+2026-04-09T20:13:04.418020090Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/sendMessage "HTTP/1.1 200 OK"
+2026-04-09T20:13:12.597590279Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T20:13:31.978817221Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T20:13:32.918841742Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T20:13:52.915603609Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T20:13:53.211531361Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T20:13:53.889329312Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/sendMessage "HTTP/1.1 200 OK"
+2026-04-09T20:13:55.144861435Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/sendMessage "HTTP/1.1 200 OK"
+2026-04-09T20:14:03.862845540Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"

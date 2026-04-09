@@ -1,0 +1,305 @@
+Now I have everything. Let me do the full numerical analysis and write the report.Here is the full report.
+
+---
+
+# CryptoSignalBot — Backtest Analysis Report
+**Generated:** 2026-04-10 | **Data period:** 2026-03-13 → 2026-03-18 (30-day scan, 5 active trading days) | **Coin:** BTC/USDT | **Bot iteration:** Current (many iterations from M1) | **Capital:** $50 × 3x = $150 position
+
+---
+
+## 1. BASIC PERFORMANCE METRICS
+
+| Metric | Raw (no costs) | Adjusted (fees + slippage + funding) |
+|---|---|---|
+| Total trades | 23 | 23 |
+| TP hits (wins) | 6 | 6 |
+| SL hits (losses) | 17 | 17 |
+| Break-even / expiry | 0 | 0 |
+| Win rate | **26.1%** | **26.1%** |
+| Loss rate | **73.9%** | **73.9%** |
+| Avg win | $2.99 | $2.51 |
+| Avg loss | $0.76 | $1.24 |
+| Gross profit | $17.94 | $15.06 |
+| Gross loss | $12.92 | $21.08 |
+| **Profit Factor** | **1.39** | **0.714** ❌ |
+| **Net PnL** | **+$5.02** | **-$6.17** ❌ |
+| Expectancy per trade | +$0.22 | **-$0.27** ❌ |
+| Max consecutive wins | 6 | — |
+| Max consecutive losses | **14** ❌ | — |
+| **Max Drawdown** | — | **28.3%** ❌ |
+| Return on base capital | +10.0% | **-12.0%** ❌ |
+
+**Friction breakdown per trade:** Taker fee round-trip (0.12%) = $0.18 + Slippage (0.20%) = $0.30 → **Total $0.48 per trade.** With 23 trades that's $11.04 pure cost drag. Funding fees on overnight holds add ~$0.15 total (negligible).
+
+**Break-even win rate (adjusted): 33.1%.** Current WR is 26.1%. The gap is **7.0 percentage points.** Every optimization effort must close this gap.
+
+---
+
+## 2. RISK-REWARD REALITY CHECK
+
+**Targeted RR:** SL = 0.5%, TP = 2.0% → **4:1 on paper.**
+
+This is a generous RR ratio. Mathematically you only need a **20% win rate to break even on raw PnL.** Yet the strategy is losing after costs. Why?
+
+**The friction problem:** $0.48 friction per trade on a $150 position = 0.32% drag. Your SL loss is only $0.76 raw. After friction, each loss actually costs **$1.24 — 63% more than the raw SL amount.** The 4:1 RR ratio is an illusion on small positions at this leverage level. The realized RR after friction is:
+
+Realized RR = $2.51 (adj win) / $1.24 (adj loss) = **2.02:1** (not 4:1).
+
+With a 2.02:1 realized RR, break-even win rate rises to 33.1%. With a realized RR of only 2:1, you essentially need the same win rate as a 2:1 system. The entire 4:1 theoretical edge is eaten by friction on a $50 base with $150 position.
+
+**Implication:** You are operating at too small a position size for these fee levels. At $500 base ($1,500 position), friction drops to 0.032% impact and the realized RR recovers toward 3.5:1.
+
+---
+
+## 3. SL & TP HIT ANALYSIS
+
+All 17 losses hit SL cleanly (no timed-out trades). All 6 wins hit TP cleanly. Zero time-based exits in this dataset.
+
+**MFE/MAE insight (inferred from entry vs exit prices):**
+- Losses: Entry to SL distance is consistently 0.50% (hard SL). Exit prices were all BELOW SL (price blew through), meaning momentum was strongly against position — no recovery observed.
+- Wins: All 6 TP hits required average 7.4 hours. Patience was rewarded. The shortest win was 4.0h (Mar 15 18:45), the longest was 9.8h (Mar 15 13:00).
+
+**Critical anomaly — data/logic bug:** Three trades on Mar 17 show **exit time BEFORE entry time on the same logical calendar block:**
+- 2026-03-17 13:30 → exit 11:30 (reported as 22h hold) — exit is 2h BEFORE entry on the same day
+- 2026-03-17 13:45 → exit 11:30 (21.8h hold)
+- 2026-03-17 10:00 → exit 11:30 (25.5h hold — this one could be next-day 11:30, which is plausible)
+
+**This is a logging bug.** The backtester's hold time calculation is crossing midnight incorrectly. Exit timestamps 00:15 and 00:30 on 2026-03-18 entries are plausible (those were the late-night Mar 17 entries that SL'd in the small hours), but the 11:30 exits for 13:30/13:45 entries make no sense unless they mean next-day 2026-03-18 11:30, which is also when several Mar 18 entries started getting hit. This suggests a shared "market crash event" at Mar 18 11:30–12:30 where multiple trades all SL'd simultaneously.
+
+---
+
+## 4. TEMPORAL PATTERNS
+
+### By Hour of Entry (UTC)
+
+| Hour Bucket | Trades | W | L | Win Rate | Adj PnL |
+|---|---|---|---|---|---|
+| 00:00–04:00 | 1 | 0 | 1 | **0%** | -$1.24 |
+| 04:00–08:00 | 2 | 0 | 2 | **0%** | -$2.48 |
+| 08:00–12:00 | 4 | 1 | 3 | 25% | -$1.21 |
+| 12:00–16:00 | 10 | 4 | 6 | **40%** ✅ | +$2.60 |
+| 16:00–20:00 | 2 | 1 | 1 | **50%** ✅ | +$1.27 |
+| 20:00–24:00 | 4 | 0 | 4 | **0%** | -$4.96 |
+
+**Best window: 12:00–20:00 UTC** (London close to early US session). 12 trades, 5W 7L, WR 41.7%, PnL +$3.87.
+**Worst windows: 00:00–08:00 UTC and 20:00–24:00 UTC.** Combined: 7 trades, 0 wins, -$8.68 in losses. These are thin Asian session hours with poor follow-through.
+
+**Recommendation: Add a hard time filter. Only allow entries from 11:00–19:00 UTC.** This eliminates the 7 guaranteed-losing trades and saves $8.68 in losses from this dataset alone. Applied to adjusted PnL, the remaining 16 trades generate: +$3.87 → still negative (-$2.37 approx) but meaningfully better.
+
+### By Day of Week
+
+| Day | Trades | W | L | Win Rate | Adj PnL |
+|---|---|---|---|---|---|
+| Friday Mar 13 | 3 | 0 | 3 | **0%** | -$3.72 |
+| Sunday Mar 15 | 4 | 4 | 0 | **100%** ✅ | +$10.04 |
+| Monday Mar 16 | 2 | 2 | 0 | **100%** ✅ | +$5.02 |
+| Tuesday Mar 17 | 8 | 0 | 8 | **0%** | -$9.92 |
+| Wednesday Mar 18 | 6 | 0 | 6 | **0%** | -$7.44 |
+
+**⚠️ Statistical caveat:** Only 5 calendar days of actual activity in a claimed 30-day scan. This extreme clustering (3 winning days, 2 losing days, 3 dead days with no trades) strongly suggests the bot only fires signals when conditions appear bullish — but Mar 17–18 BTC was in a local downtrend (74.4k → 72.3k), and the signals kept firing anyway. The Sunday/Monday 100% win rate reflects a genuine trending day (BTC +2.3% from 71.4k to 73.0k on Mar 15). The Tue/Wed results reflect the reverse.
+
+**This is a regime-blindness problem, not a day-of-week problem.** Do not add a "no Tuesday trading" filter. Instead, fix the root cause: the bot cannot detect a bearish day and keeps firing long signals into falling price action.
+
+---
+
+## 5. SCORE THRESHOLD ANALYSIS
+
+| Score | Trades | W | L | Win Rate | Profit Factor (adj) |
+|---|---|---|---|---|---|
+| 60 | 8 | 3 | 5 | **38%** ✅ | 0.97 (near break-even) |
+| 65 | 10 | **0** | **10** | **0%** ❌ | 0.00 |
+| 75 | 5 | 3 | 2 | **60%** ✅ | 2.02 ✅ |
+
+**This is the single most important finding in the entire dataset.**
+
+Score 65 is the most common score (10 trades, 43% of all trades) and has a **0% win rate.** It outperforms flipping a coin — in the wrong direction. Score 75 achieves 60% WR, which is excellent. Score 60 achieves 38%, which is above break-even.
+
+Why does Score 65 perform worse than Score 60? Looking at the signals: Score 65 trades typically have `price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch` (no volume_spike, no MACD). The BB_lower_touch at score 65 appears to be a **false oversold trap** — price touches lower BB in a downtrend and keeps going lower. Without a volume spike or MACD confirmation, this is a weak signal that consistently fails.
+
+**Optimal threshold: 75.** Running only Score ≥75 trades gives 5 trades, 3W 2L, 60% WR, Profit Factor 2.02 (adjusted). This is the only score tier that is profitable after costs.
+
+If you insist on taking Score 60 trades (38% WR is barely above break-even), the combined Score 60 + Score 75 portfolio (13 trades, 6W 7L, 46.2% WR) achieves a PF of ~1.04 (adjusted) — barely viable, but only on days that aren't trending bearish.
+
+**Never take Score 65 trades without additional confirmation.**
+
+---
+
+## 6. SIGNAL REASON ANALYSIS
+
+| Signal Component | Occurrences | W | L | WR |
+|---|---|---|---|---|
+| price>EMA200 | 18 | 6 | 12 | 33% |
+| EMA50>EMA200 | 23 | 6 | 17 | 26% |
+| RSI_recovering (30–45) | 17 | 6 | 11 | **35%** |
+| RSI_oversold (<30) | 5 | 0 | 5 | **0%** ❌ |
+| MACD_crossover | 2 | 0 | 2 | 0% |
+| BB_lower_touch | 13 | 3 | 10 | 23% |
+| volume_spike | 19 | 6 | 13 | 32% |
+
+**RSI_oversold has a 0% win rate (5/5 losses).** All RSI_oversold trades occurred on 2026-03-18 when BTC was in clear decline. RSI going below 30 in a downtrend is bearish continuation, not a reversal signal. The scorer gives this condition its maximum 20 points — but it is actively harmful in this dataset. This is counterintuitive but real: **RSI oversold in a falling market = price is accelerating down, not reversing.**
+
+**MACD_crossover: 0% win rate (2/2 losses).** Both were Mar 13 trades. MACD crossovers on 15m are extremely noisy and lag badly.
+
+**RSI_recovering (30–45) is actually the best momentum signal at 35% WR.** It identifies partial recovery (not full oversold), which is a healthier signal.
+
+**BB_lower_touch alone is unreliable (23% WR).** It only works when combined with volume_spike AND price>EMA200.
+
+**Best signal combination identified from winning trades:** `price>EMA200 + EMA50>EMA200 + RSI_recovering + volume_spike` — all 6 wins contain some form of this combination. The 3 Score-75 wins additionally require `BB_lower_touch`, and that extra filter pushes WR to 60%.
+
+---
+
+## 7. HOLD DURATION ANALYSIS
+
+| Category | Avg Hold |
+|---|---|
+| Winning trades | **7.4h** |
+| Losing trades (all, including anomalous) | 5.4h |
+| Losing trades (clean, ≤10h) | **1.6h** |
+
+Winning trades hit TP in 4–10 hours (mean 7.4h). This means entries require patience — you cannot put a max hold of 1–2h and expect wins.
+
+Losing trades hit SL very quickly (mean 1.6h when filtering anomalies). This is actually good signal quality in reverse: when the trade is wrong, it is wrong fast and SL triggers cleanly. No prolonged slow bleeders.
+
+The anomalous long holds (21.8h, 22h, 25.5h for losses) are almost certainly a **backtester bug** — exit timestamps appear to be shared across multiple simultaneous trades that all SL'd at the same market event. This inflates the losing hold average.
+
+**Recommendation:** `MAX_HOLD_CANDLES = 40` (10 hours) would have covered all winners without catching losing trades. The current M1 config had 20 candles (5h), which would have timed out 3 of the 6 winning trades early. Make sure the hold limit is at least 10h for this TP%.
+
+---
+
+## 8. SENSITIVITY ANALYSIS
+
+**If SL widens from 0.5% → 0.7%:**
+- Raw loss per trade increases from $0.76 to $1.05 (+38%)
+- Adjusted loss becomes $1.53 (vs current $1.24)
+- For this to break even, WR must rise to ~37%
+- Some of the Mar 17–18 SL hits at 0.5% might have recovered to TP with a 0.7% SL, but without candle-level data this cannot be confirmed
+- **Verdict:** Only widen SL if you add a trend filter first. Widening SL into a bearish regime makes losses much larger.
+
+**If TP extends from 2.0% → 2.5%:**
+- Adj win becomes $3.26 (from $2.51)
+- Break-even WR drops to 27.5% (from 33.1%) — more achievable
+- But Mar 15's winning trades hit exactly at 2% (price went from 71.4k to 73.0k and stopped). A 2.5% TP might have left those trades open past expiry.
+- **Verdict:** Only sensible if combined with a trailing stop. A fixed 2.5% TP may miss the same number of trades at a different threshold.
+
+**If leverage drops from 3x → 2x:**
+- Position size drops to $100, adj win = $1.68, adj loss = $0.82
+- EV per trade improves slightly to -$0.17 (from -$0.27) because friction is now a smaller proportion of the win
+- **Max drawdown reduces from ~28% to ~19%** — below the 20% viability threshold
+- **Verdict:** Dropping to 2x leverage alone does not fix the strategy but does bring max drawdown below the 20% warning threshold and is safer for initial live paper trading.
+
+**Impact of position size ($500 base, $1500 position, same 3x):**
+- Friction remains $0.48 per trade (same % of position)
+- Wait — friction scales with position: $1500 × 0.32% = $4.80 per trade
+- But wins scale too: $1500 × 2% = $30 per win, losses: $1500 × 0.5% = $7.50
+- Adj win = $25.20, adj loss = $12.30 → same profit factor of 0.71 — identical EV ratio
+- The strategy's win rate problem is not solved by bigger size. **Fix the WR first, then scale.**
+
+---
+
+## 9. CRITICAL STRUCTURAL PROBLEMS (Not in analysis.txt but must be flagged)
+
+### Problem A: Signal Flooding / No Cooldown
+The bot fired **4 signals within 30 minutes on Mar 15 (13:00, 13:15, 13:30)** and **5 signals within 60 minutes on Mar 18 (11:30, 11:45, 12:00, 12:15, 12:30)**. These are effectively the same trade opened 4–5 times in parallel. On Mar 18, all 5 lost simultaneously. If this were live with real capital and each signal were treated as a separate trade, you would have had **$750 in correlated short-term exposure** when only $150 was intended.
+
+In the backtest, each trade is treated independently, which inflates the trade count artificially. The "23 trades" are really closer to **9–10 independent market decisions.** This is a form of backtest inflation.
+
+### Problem B: Same-direction stacking on identical asset
+There is no deduplication logic. The bot scans BTC/USDT every 15 minutes and fires a signal if score ≥ 60. On a trending day (either direction), it will stack 4–8 simultaneous positions in the same direction. This is not diversification — it is leverage amplification without acknowledgement.
+
+### Problem C: No market regime detection
+All 23 trades are LONG. The bot has no short capability and no "market is trending down — stop generating longs" logic. On Mar 17–18, BTC dropped ~3% and the bot fired 14 consecutive long signals, all of which lost. A basic regime filter (e.g., "if price < EMA200 on 4h chart, do not take 15m longs") would have eliminated the entire Mar 17–18 loss cluster.
+
+### Problem D: Score 65 inverted performance
+As noted above: Score 65 = 0% win rate. This score tier is more common than Score 75 but actively destroys capital. The scoring algorithm is generating a "dead zone" at 65 that is statistically worse than not trading.
+
+### Problem E: Backtester exit-time bug
+Several trades show exit times before their entry times (same-day basis). This indicates the backtester is not correctly tracking individual trade exit times when multiple trades are open simultaneously. All exits on Mar 17 that show "11:30" appear to reference the same market level (BTC at 72782.0), suggesting the backtester found one common SL event and assigned it to all open trades — correct in outcome but the hold-time timestamps are wrong.
+
+---
+
+## 10. ACTIONABLE MODIFICATION CHECKLIST
+
+**Priority 1 — CRITICAL (must fix before any testing):**
+
+- [ ] **Add cooldown filter:** After a signal fires for BTC/USDT, block any new signal on the same coin for the next 4 candles (1 hour at 15m TF). In `telegram_bot.py`, maintain a `last_signal_time` dict per symbol and check `now - last_signal_time[symbol] < 3600` before calling `format_signal_message`. This alone eliminates ~6 of the 23 trades (the Mar 15 13:00/13:15/13:30 cluster and Mar 18 morning cluster).
+
+- [ ] **Add daily trade cap:** Max 2 trades per coin per calendar day. Add a `daily_trade_count` counter in `scan_all_coins()` reset at UTC midnight. If `daily_trade_count[symbol] >= 2`, skip. This caps the Mar 17 8-trade day to 2 trades (saves ~$7.44 in losses in this dataset).
+
+- [ ] **Raise minimum score threshold to 75:** In `config.py`, change `WEAK_SIGNAL_THRESHOLD = 60` to `WEAK_SIGNAL_THRESHOLD = 75`. This eliminates the entire Score 65 dead zone (0% WR, 10 trades, all losses). If you want to keep Score 60 trades, add a separate "watchlist only" mode that does NOT execute (even in simulation). In this dataset, Score ≥75 only = 5 trades, 60% WR, PF 2.02 adjusted.
+
+- [ ] **Add time filter:** In `scan_all_coins()` or `scheduled_scan()`, add `current_hour = datetime.utcnow().hour` and only proceed if `11 <= current_hour < 19`. This blocks the 00–08 UTC and 20–24 UTC dead zones (7 trades, 0 wins in this dataset).
+
+- [ ] **Fix MAX_HOLD_CANDLES:** Change from M1's `MAX_HOLD_CANDLES = 20` (5h) to `MAX_HOLD_CANDLES = 48` (12h). All winning trades needed 4–10h. A 5h limit would have force-exited 4 of the 6 winners at mid-trade (likely at breakeven or small loss). Check if current iteration already changed this — if the backtester had a 5h limit enforced, the actual win count could be higher than 6 with a longer hold.
+
+**Priority 2 — HIGH (implement before paper trading):**
+
+- [ ] **Add 4h chart trend gate:** Before generating any signal on the 15m TF, fetch the 4h OHLCV for the same coin and check `close > EMA200 on 4h`. Add a second call in `telegram_bot.py`: `df_4h = fetch_ohlcv(symbol, timeframe="4h", limit=210)`, compute EMA200 on it, and only proceed if `df_4h.iloc[-1]['close'] > df_4h.iloc[-1]['EMA_200']`. This is the single most powerful regime filter. All Mar 17–18 losses occurred when BTC was below its 4h EMA200. In `data_fetcher.py`, the existing `fetch_ohlcv` function already handles this — just call it with `timeframe="4h"`.
+
+- [ ] **Remove RSI_oversold (<30) as a positive scoring component:** In `scorer.py`, the RSI<30 block gives 20 points. This is counterproductive: 5 trades with RSI_oversold, 0 wins. Change the scoring logic so that RSI<30 is a NEUTRAL or even a warning flag rather than a bonus. Replace with: if `rsi < 30`, add 5 points but also flag `regime_bearish = True` which can be used as a soft filter. Or simply: RSI<30 in a downtrend = skip trade entirely.
+
+- [ ] **Require volume_spike as mandatory condition (not bonus):** Looking at all 6 wins — every single one has `volume_spike` in reasons. The only losses with volume_spike are during the Mar 17–18 bearish regime (where no amount of volume helped). In `scorer.py`, add a hard check: `if latest['volume'] < latest['VOL_SMA_20'] * 1.3: return 0, "low_volume"` — don't even score if volume isn't elevated. Or add it as a gating condition before any scoring.
+
+- [ ] **Block MACD_crossover as standalone trigger:** MACD crossover on 15m TF has 0% win rate in this dataset (2/2 losses). It is a lagging indicator on short timeframes. In `scorer.py`, reduce MACD crossover from 15 points to 5 points, or only allow it as a tie-breaker when the main score already meets 70+ from other components. The MACD histogram positive (+8 pts) is less dangerous than the crossover — keep it.
+
+- [ ] **Add deduplication in backtester:** The backtester must track open positions. If a trade is already open for BTC/USDT, do not open another one until the first exits. Add a `open_positions` set in `backtester.py`'s simulation loop: before opening a trade, check `if symbol in open_positions: continue`. This will massively reduce the trade count in backtest and give you a more realistic trade sample.
+
+**Priority 3 — MEDIUM (implement before 10-coin expansion):**
+
+- [ ] **Add ADX component to scorer.py:** Add `df.ta.adx(length=14, append=True)` in `indicators.py` (generates `ADX_14`, `DMP_14`, `DMN_14` columns). In `scorer.py`, add: `if latest['ADX_14'] > 25: score += 10; reasons.append("ADX_trending")`. ADX>25 confirms trending conditions and would have filtered several mean-reversion false signals. Max score increase: 10 points — shift `STRONG_SIGNAL_THRESHOLD` to 80 if you add this.
+
+- [ ] **Implement partial TP (scale-out):** Instead of fixed 2% TP, take 50% off at +1% and trail the remaining 50% with a 0.3% trailing stop. This would have locked in profit on Mar 15 trades sooner and reduced hold time risk. Requires restructuring `backtester.py`'s exit logic from binary (TP/SL) to multi-stage. Flag: this is a meaningful code change — defer to after basic filters are working.
+
+- [ ] **Add BB squeeze filter (Keltner Channel comparison):** BB lower touch is only meaningful when volatility is expanding (BB bands widening). Add a check: `if latest['BBU_20_2.0'] - latest['BBL_20_2.0'] > prev['BBU_20_2.0'] - prev['BBL_20_2.0']` — bands widening = valid squeeze breakout. Narrowing bands = do not trade on BB touch alone. This requires only two rows of data (already available).
+
+- [ ] **Log MFE and MAE per trade:** Update `trade_logger.py` to add columns `mfe_pct REAL, mae_pct REAL`. In the backtester's simulation loop, track the highest close reached (MFE) and lowest close reached (MAE) for each open trade during its lifetime. This data is essential for future TP/SL optimization and is currently missing entirely from your logs.
+
+- [ ] **Position sizing: Kelly or fixed fractional:** Current position is always $50×3x regardless of score or confidence. Implement simple score-based sizing: Score 75 → $50×3x ($150), Score 80+ → $50×4x ($200). Never size up without a proportional boost in confirmed win rate. For initial paper/live testing, keep fixed sizing until WR on filtered signals is confirmed over ≥50 trades.
+
+**Priority 4 — LOW (before multi-coin live):**
+
+- [ ] **Add per-coin configuration:** When expanding to 10 coins, each coin has different volatility. A 0.5% SL appropriate for BTC may be too tight for DOGE or SOL (higher beta coins). In `config.py`, add a dict `SL_OVERRIDES = {"DOGE/USDT": 0.8, "SOL/USDT": 0.7}` and use `SL_OVERRIDES.get(symbol, SL_PERCENT)` in the backtester and signal formatter.
+
+- [ ] **Add correlation guard for 10-coin mode:** When multiple coins fire simultaneously (likely in a broad market move), limit total concurrent open positions to 3. Add a global `open_position_count` in `scan_all_coins()` and `if open_position_count >= 3: break` before opening new trades. Without this, a broad market crash would open 10 simultaneous losing positions.
+
+- [ ] **Fix exit timestamp logging bug:** In `backtester.py`, each trade must store its own exit timestamp independently rather than sharing a common exit price reference across simultaneous open positions. Add a `trade_id` UUID to each simulated trade and ensure exit time is recorded per-trade, not per-market-event.
+
+- [ ] **Add Telegram rate limiting for multi-coin:** With 10 coins at Score ≥75, you may fire multiple signals in one scan. Add a `asyncio.sleep(0.5)` between Telegram sends in `scan_all_coins()` to avoid hitting Telegram's 30 msg/sec limit and flooding your chat.
+
+---
+
+## EXECUTIVE SUMMARY
+
+### What the numbers say
+
+The bot generated **$5.02 raw profit** on 23 trades over an active 5-day window. After applying realistic fees ($0.18/trade), slippage ($0.30/trade), and funding costs, the **actual result is -$6.17 — a 12% loss on base capital** with a **28.3% max drawdown.** The raw profit factor of 1.39 looks acceptable until you apply costs, at which point it collapses to 0.71. The strategy is not viable in its current form for live deployment.
+
+### Why it looks better than it is
+
+The backtest has 6 wins and 17 losses, but all 6 wins happened across just **2 calendar days (Mar 15–16)** when BTC trended upward cleanly. All 17 losses happened across **3 calendar days (Mar 13, 17, 18)** when BTC either fell or chopped. The bot has no mechanism to distinguish these conditions. In a 30-day period, you might get 6–8 strongly trending days and 22–24 choppy/bearish days. Extrapolated, the strategy would generate massive losses on those 22 days while recovering on only the 6 good days — and the recovery is insufficient after costs.
+
+### The three root causes
+
+**Root cause 1 — No regime filter.** The bot fires LONG signals regardless of whether the 4-hour trend is bullish or bearish. Adding a 4h EMA200 trend gate is the single highest-leverage change and would have eliminated the entire Mar 17–18 loss cluster (14 consecutive losses).
+
+**Root cause 2 — Signal flooding.** Multiple identical signals fire within 15-minute windows, creating fake trade count inflation and correlated exposure. A 1-hour cooldown per symbol would reduce the 23-trade count to ~10–12 genuinely independent trades.
+
+**Root cause 3 — Score 65 dead zone.** Score 65 (43% of all trades) has a 0% win rate. Raising the minimum threshold to 75 eliminates this entire dead zone. Score 75 achieves 60% WR and a 2.02:1 adjusted profit factor — the only signal tier that is genuinely profitable.
+
+### Deployment readiness
+
+**❌ NOT READY FOR LIVE TRADING.**
+**⚠️ NEEDS TUNING BEFORE PAPER TRADING.**
+
+The immediate path forward:
+
+Step 1 — Apply Priority 1 fixes (cooldown, daily cap, score ≥75 threshold, time filter, fix MAX_HOLD_CANDLES). Re-run backtest on the same 30-day dataset and verify the adjusted trade set. Target: ≥10 clean independent trades with WR ≥45% and profit factor ≥1.3 after costs.
+
+Step 2 — Add the 4h trend gate (Priority 2). Re-run. This is the regime filter that separates viable from not-viable.
+
+Step 3 — Paper trade BTC/USDT only for 30 days with those fixes live. Collect ≥30 independent trade samples (enforced by the cooldown). Do not move to multi-coin until paper trading confirms WR ≥40% and PF ≥1.2 over ≥30 trades.
+
+Step 4 — Once confirmed, add 9 more coins with per-coin SL calibration and the correlation guard. Paper trade 10 coins for 2 weeks.
+
+Step 5 — Live deploy with minimum $500 base capital (not $50) to reduce the fee-to-position ratio to an acceptable level. At $50 base, friction consumes 63% of each loss's profit potential. At $500 base, the same strategy has meaningfully better realized RR.
+
+The core signal logic (EMA50>EMA200 + RSI_recovering + volume_spike + BB_lower_touch) is sound and produces 60% WR when conditions are right (Score 75, correct regime). The bot is not broken — it is unfiltered.

@@ -1,0 +1,22 @@
+2026-04-09T21:24:20.861462534Z [inf]  Starting Container
+2026-04-09T21:24:22.728609414Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getMe "HTTP/1.1 200 OK"
+2026-04-09T21:24:22.728691104Z [err]  INFO:telegram_bot:Bot started. Historic:True, Live:False, Hybrid:False
+2026-04-09T21:24:22.742648189Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/deleteWebhook "HTTP/1.1 200 OK"
+2026-04-09T21:24:22.744256867Z [err]  INFO:apscheduler.scheduler:Scheduler started
+2026-04-09T21:24:22.744263967Z [err]  INFO:telegram.ext.Application:Application started
+2026-04-09T21:24:29.937243132Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"
+2026-04-09T21:24:30.762476415Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/sendMessage "HTTP/1.1 200 OK"
+2026-04-09T21:24:30.762482669Z [err]  INFO:telegram_bot:Starting HISTORICAL scan for 30 days...
+2026-04-09T21:24:30.827080063Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/sendMessage "HTTP/1.1 200 OK"
+2026-04-09T21:24:30.827089963Z [err]  INFO:scan_engine:Fetching 30 days of historical data for BTC/USDT
+2026-04-09T21:24:31.985639696Z [err]  INFO:scan_engine:Fetched 999 candles
+2026-04-09T21:24:34.962342999Z [err]  INFO:scan_engine:Total candles: 800, days_checked: 30, max_hold: 192
+2026-04-09T21:24:34.973034988Z [err]  ERROR:scan_engine:Error in daily scan: string indices must be integers, not 'str'
+2026-04-09T21:24:34.973041715Z [err]  ERROR:scan_engine:Traceback (most recent call last):
+2026-04-09T21:24:34.973049104Z [err]    File "/app/scan_engine.py", line 74, in scan_daily_historical
+2026-04-09T21:24:34.973087611Z [err]      if candle['high'] >= tp_price:
+2026-04-09T21:24:34.973093720Z [err]         ~~~~~~^^^^^^^^
+2026-04-09T21:24:34.973098815Z [err]  TypeError: string indices must be integers, not 'str'
+2026-04-09T21:24:34.973103455Z [err]  
+2026-04-09T21:24:35.336775805Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/sendMessage "HTTP/1.1 200 OK"
+2026-04-09T21:24:39.903592852Z [err]  INFO:httpx:HTTP Request: POST https://api.telegram.org/bot8765757634:AAFDYAsF72mE6UHav4V9VU1U6npIuogcFfc/getUpdates "HTTP/1.1 200 OK"

@@ -1,0 +1,187 @@
+MyZebArb Tracker:
+📊 Starting Historical Scan
+🔄 30 days, 3x, $50.0
+
+📊 BTC BACKTEST SUMMARY (30 days)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 Buy: $50.0 × 3x = $150.0
+📈 Total Trades: 5
+✅ TP: 1 | ❌ SL: 1 | 🎯 Win: 80.0%
+💵 Total PnL: $4.44
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ 2026-03-15 13:00
+📌 71444.2 → 71483.4
+🛑 SL:71086.98 | 🎯 TP:72873.08
+📦 $150.0 | Qty:0.0021 BTC
+💵 PnL: $0.24 (0.16%) | PROFIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 2026-03-15 13:30
+📌 71449.6 → 71485.4
+🛑 SL:71092.35 | 🎯 TP:72878.59
+📦 $150.0 | Qty:0.0021 BTC
+💵 PnL: $0.22 (0.15%) | PROFIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 2026-03-16 08:30
+📌 72911.9 → 73137.5
+🛑 SL:72547.34 | 🎯 TP:74370.14
+📦 $150.0 | Qty:0.0021 BTC
+💵 PnL: $2.99 (2.00%) | TP HIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 2026-03-17 10:00
+📌 73686.9 → 73966.1
+🛑 SL:73318.47 | 🎯 TP:75160.64
+📦 $150.0 | Qty:0.0020 BTC
+💵 PnL: $1.70 (1.13%) | PROFIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 2026-03-17 22:30
+📌 74161.1 → 74229.5
+🛑 SL:73790.29 | 🎯 TP:75644.32
+📦 $150.0 | Qty:0.0020 BTC
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Aegon:
+/scan
+
+MyZebArb Tracker:
+🔍 Scanning...
+
+📊 Starting Historical Scan
+🔄 30 days, 3x, $50.0
+
+❌ No scan results generated
+
+Aegon:
+/scan
+
+MyZebArb Tracker:
+🔍 Scanning...
+
+📊 Starting Historical Scan
+🔄 30 days, 3x, $50.0
+
+❌ No scan results generated
+
+Aegon:
+/scan
+
+MyZebArb Tracker:
+🔍 Scanning...
+
+📊 Starting Historical Scan
+🔄 30 days, 3x, $50.0
+
+📊 BTC BACKTEST SUMMARY (30 days)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 Buy: $50.0 × 3x = $150.0
+📈 Total Trades: 14
+✅ TP: 5 | ❌ SL: 9 | 🎯 Win: 35.7%
+💵 Total PnL: $8.11
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ 2026-03-13 12:45 → 14:45
+📌 72779.5 → 72362.2
+🛑 SL:72415.6 | 🎯 TP:74235.09
+📦 $150.0 | Qty:0.0021 BTC | Hold:2.0h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:65 | price>EMA200 + EMA50>EMA200 + MACD_crossover + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 2026-03-13 16:15 → 17:45
+📌 71391.5 → 70902.1
+🛑 SL:71034.54 | 🎯 TP:72819.33
+📦 $150.0 | Qty:0.0021 BTC | Hold:1.5h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:60 | price>EMA200 + EMA50>EMA200 + RSI_recovering + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 2026-03-13 20:15 → 22:00
+📌 71304.1 → 70681.3
+🛑 SL:70947.58 | 🎯 TP:72730.18
+📦 $150.0 | Qty:0.0021 BTC | Hold:1.8h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:65 | price>EMA200 + EMA50>EMA200 + RSI_recovering + MACD_crossover
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 2026-03-15 13:00 → 22:45
+📌 71444.2 → 73078.3
+🛑 SL:71086.98 | 🎯 TP:72873.08
+📦 $150.0 | Qty:0.0021 BTC | Hold:9.8h
+💵 PnL: $2.99 (2.00%) | TP HIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 2026-03-15 13:15 → 22:45
+📌 71522.3 → 73078.3
+🛑 SL:71164.69 | 🎯 TP:72952.75
+📦 $150.0 | Qty:0.0021 BTC | Hold:9.5h
+💵 PnL: $2.99 (2.00%) | TP HIT
+📊 Score:60 | price>EMA200 + EMA50>EMA200 + RSI_recovering + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 2026-03-15 13:30 → 22:45
+📌 71449.6 → 73078.3
+🛑 SL:71092.35 | 🎯 TP:72878.59
+📦 $150.0 | Qty:0.0021 BTC | Hold:9.2h
+💵 PnL: $2.99 (2.00%) | TP HIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 2026-03-16 08:30 → 13:30
+📌 72911.9 → 74516.4
+🛑 SL:72547.34 | 🎯 TP:74370.14
+📦 $150.0 | Qty:0.0021 BTC | Hold:5.0h
+💵 PnL: $2.99 (2.00%) | TP HIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 2026-03-16 14:30 → 21:30
+📌 73137.5 → 74804.0
+🛑 SL:72771.81 | 🎯 TP:74600.25
+📦 $150.0 | Qty:0.0021 BTC | Hold:7.0h
+💵 PnL: $2.99 (2.00%) | TP HIT
+📊 Score:60 | price>EMA200 + EMA50>EMA200 + RSI_recovering + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 2026-03-17 03:30 → 04:30
+📌 74426.7 → 73976.2
+🛑 SL:74054.57 | 🎯 TP:75915.23
+📦 $150.0 | Qty:0.0020 BTC | Hold:1.0h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:60 | price>EMA200 + EMA50>EMA200 + RSI_recovering + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 2026-03-17 04:30 → 10:00
+📌 74062.5 → 73560.3
+🛑 SL:73692.19 | 🎯 TP:75543.75
+📦 $150.0 | Qty:0.0020 BTC | Hold:5.5h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:65 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ 2026-03-17 10:00 → 11:30
+📌 73686.9 → 72782.0
+🛑 SL:73318.47 | 🎯 TP:75160.64
+📦 $150.0 | Qty:0.0020 BTC | Hold:25.5h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:75 | price>EMA200 + EMA50>EMA200 + RSI_recovering + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 2026-03-18 07:45 → 11:30
+📌 73878.8 → 72782.0
+🛑 SL:73509.41 | 🎯 TP:75356.38
+📦 $150.0 | Qty:0.0020 BTC | Hold:3.8h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:60 | price>EMA200 + EMA50>EMA200 + RSI_recovering + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 2026-03-18 11:30 → 12:00
+📌 73115.4 → 72668.1
+🛑 SL:72749.82 | 🎯 TP:74577.71
+📦 $150.0 | Qty:0.0021 BTC | Hold:0.5h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:65 | EMA50>EMA200 + RSI_oversold + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 2026-03-18 11:45 → 12:30
+📌 72947.0 → 72311.0
+🛑 SL:72582.26 | 🎯 TP:74405.94
+📦 $150.0 | Qty:0.0021 BTC | Hold:0.8h
+💵 PnL: $-0.76 (-0.50%) | SL HIT
+📊 Score:65 | EMA50>EMA200 + RSI_oversold + BB_lower_touch + volume_spike
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
