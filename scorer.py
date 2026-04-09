@@ -48,13 +48,13 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
             score += 15
             reasons.append("BB_lower_touch_expanding")
         else:
-            score += 5
+            score += 10
             reasons.append("BB_lower_touch_narrow")
     elif latest['close'] >= latest['BBU_20_2']:
         score -= 10
         reasons.append("BB_upper_penalty")
 
-    if latest['ADX_14'] > 25:
+    if latest['ADX_14'] > 20:
         score += 10
         reasons.append("ADX_trending")
 

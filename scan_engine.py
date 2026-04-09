@@ -35,6 +35,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         total_candles = len(df)
         days_checked = min(days, total_candles - MAX_HOLD_CANDLES)
         
+        trend_bullish = check_4h_trend(symbol)
+        trend_check_interval = 16
+        
         trades_per_day = {}
         last_signal_time = {}
         open_positions = set()
@@ -44,28 +47,24 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         
         for i in range(24, total_candles - MAX_HOLD_CANDLES):
             total_scanned += 1
+            day_idx = i // 24
+            if day_idx >= days_checked:
+                break
             
             if total_concurrent >= MAX_CONCURRENT_TRADES:
                 continue
             
-            day_idx = i // 24
-            if day_idx >= days_checked:
-                break
+            if i % trend_check_interval == 0:
+                trend_bullish = check_4h_trend(symbol)
+            
+            if not trend_bullish:
+                continue
             
             if symbol in open_positions:
                 continue
             
             window = df.iloc[:i]
             if len(window) < 50:
-                continue
-            
-            entry_time = window.index[-1]
-            entry_hour = entry_time.hour
-            
-            if entry_hour < TRADE_HOURS_START or entry_hour >= TRADE_HOURS_END:
-                continue
-            
-            if not check_4h_trend(symbol):
                 continue
             
             score, reason = calculate_score(window)
@@ -98,6 +97,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             future = df.iloc[i:i+hold_candles]
             if len(future) == 0:
                 open_positions.discard(symbol)
+            total_concurrent = max(0, total_concurrent - 1)
                 continue
             
             mfe = future['high'].max()
@@ -148,9 +148,10 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 result = "LOSS"
             
             open_positions.discard(symbol)
+            total_concurrent = max(0, total_concurrent - 1)
             
-            fee = (TP_PERCENT + SL_PERCENT) / 2 * LEVERAGE * 0.001
-            pnl_after_fee = pnl_pct - fee
+            fee_pct = FEE_PERCENT * 2
+            pnl_after_fee = pnl_pct - fee_pct
             
             pnl_usd = (BUY_AMOUNT * LEVERAGE) * (pnl_pct / 100)
             pnl_usd_after_fee = (BUY_AMOUNT * LEVERAGE) * (pnl_after_fee / 100)
