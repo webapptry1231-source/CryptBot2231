@@ -84,8 +84,30 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             entry_time = window.index[-1]
             entry_hour = entry_time.hour
             
+            logger.info(f"Checking candle {i}: hour={entry_hour}, trend={trend_bullish}, time_window={TRADE_HOURS_START}-{TRADE_HOURS_END}")
+            
+            if entry_hour < TRADE_HOURS_START or entry_hour >= TRADE_HOURS_END:
+                logger.info(f"  -> Skip: outside time window")
+                continue
+            
+            if not trend_bullish:
+                logger.info(f"  -> Skip: 4h trend bearish")
+                continue
+            
+            score, reason = calculate_score(window)
+            logger.info(f"  -> Score: {score}, Reason: {reason}")
+            
+            if score < WEAK_SIGNAL_THRESHOLD:
+                logger.info(f"  -> Skip: score below threshold {WEAK_SIGNAL_THRESHOLD}")
+                continue
+            
+            if "low_volume" in reason:
+                logger.info(f"  -> Skip: low volume")
+                continue
+            
             last_signal = last_signal_time.get(symbol)
             if last_signal and (entry_time - last_signal).total_seconds() < (SIGNAL_COOLDOWN_HOURS * 3600):
+                logger.info(f"  -> Skip: cooldown active")
                 continue
             
             day_date = str(entry_time)[:10]
