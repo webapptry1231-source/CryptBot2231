@@ -145,8 +145,8 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             trailing_sl = sl_price
             running_high = entry_price
             trade_closed = False
-            exit_price = None
-            exit_time = None
+            exit_price = entry_price
+            exit_time = entry_time
             pnl_pct = 0
             result = "PENDING"
             
