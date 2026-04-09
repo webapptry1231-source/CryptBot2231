@@ -3,7 +3,8 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
-                    TIMEFRAME, CANDLES_NEEDED, SCAN_INTERVAL_SECONDS, SIMULATION_MODE)
+                    TIMEFRAME, CANDLES_NEEDED, SCAN_INTERVAL_SECONDS, SIMULATION_MODE,
+                    STRONG_SIGNAL_THRESHOLD, WEAK_SIGNAL_THRESHOLD)
 from data_fetcher import fetch_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
