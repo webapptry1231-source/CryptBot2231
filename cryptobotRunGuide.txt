@@ -1,0 +1,160 @@
+# 📖 RUNNING GUIDE
+
+---
+
+## PART A: Historical Backtesting
+
+This tests your strategy on past market data. Do this first, before anything live.
+
+**Step 1 — Install dependencies**
+
+Create and activate a virtual environment first:
+
+```bash
+python -m venv .venv
+# Linux/macOS:
+source .venv/bin/activate
+# Windows:
+.venv\Scripts\activate
+
+pip install -r requirements.txt
+```
+
+**Step 2 — Verify pandas-ta installs correctly**
+
+Run this one-liner to confirm. If it crashes, your pandas version may be incompatible:
+
+```bash
+python -c "import pandas_ta as ta; print(ta.version)"
+```
+
+Expected output: `0.3.14b0`. If you get an import error, try `pip install pandas-ta==0.3.14b0 --no-deps` followed by `pip install pandas numpy`.
+
+**Step 3 — Run the backtest**
+
+Open a Python shell or create a quick `run_backtest.py` file:
+
+```python
+from backtester import run_full_backtest
+
+# Test 90 days of data on all 10 coins
+results = run_full_backtest(days_back=90)
+```
+
+Then run it:
+
+```bash
+python run_backtest.py
+```
+
+This will take 5–15 minutes depending on your internet speed. It fetches live historical data from Binance's public API — no API key needed. You'll see output per coin as it completes.
+
+**What good results look like:**
+- Win Rate ≥ 55% (you need this before going further)
+- Profit Factor ≥ 1.3 (total wins / total losses in %)
+- Max Drawdown < -15% (anything worse means the strategy is fragile)
+- Total trades ≥ 20 per coin (fewer trades = statistically unreliable)
+
+**If results are bad:** Go back to `config.py` and adjust:
+- Raise `STRONG_SIGNAL_THRESHOLD` to 80 (more selective, fewer but higher quality trades)
+- Lower `TP_PERCENT` to 0.7 and `SL_PERCENT` to 0.35 (tighter RR but same 2:1 ratio)
+- Try `days_back=180` for 6 months to test across more market conditions
+
+**Do not proceed to live testing until backtest shows positive profit factor across at least 5 of the 10 coins.**
+
+---
+
+## PART B: Live Market Simulation (Paper Trading)
+
+This runs the bot against the real live market but places zero real orders. It only sends Telegram alerts and logs to SQLite.
+
+**Step 1 — Create your Telegram Bot**
+
+Open Telegram, search for `@BotFather`, send `/newbot`. Give it any name and username. Copy the token it gives you.
+
+**Step 2 — Get your Chat ID**
+
+Search Telegram for `@userinfobot` and start it. It will reply with a number like `123456789`. That is your chat ID.
+
+**Step 3 — Fill your .env file**
+
+```
+TELEGRAM_TOKEN=111111111:AAAAA-your-actual-token-here
+TELEGRAM_CHAT_ID=123456789
+```
+
+**Step 4 — Confirm SIMULATION_MODE is True**
+
+Open `config.py`. Make sure `SIMULATION_MODE = True`. This must be True for all testing.
+
+**Step 5 — Run the bot locally**
+
+```bash
+python main.py
+```
+
+You should see `Bot started. Polling for updates...` in your terminal. Open Telegram, message your bot `/start`. If it replies, the bot is working.
+
+The bot will now auto-scan every 15 minutes. Any signal above 75 triggers a Telegram message to your chat.
+
+**Step 6 — Verify the first scheduled scan**
+
+Wait 10 seconds after startup. The first scan fires automatically. Watch your terminal for coin-by-coin output. If you see errors on specific coins (usually rate limit or network timeout), that is normal — the bot handles these with try/except and moves to the next coin.
+
+**Step 7 — Manual on-demand scan**
+
+Send `/scan` to your bot at any time. It will scan all 10 coins immediately and reply with any signals found, or "No signals above threshold" if the market is quiet.
+
+**Step 8 — Check the SQLite log**
+
+After a few signals appear, you can inspect the logs:
+
+```bash
+python -c "
+import sqlite3
+conn = sqlite3.connect('logs/trades.db')
+rows = conn.execute('SELECT * FROM signals ORDER BY id DESC LIMIT 10').fetchall()
+for r in rows: print(r)
+conn.close()
+"
+```
+
+This shows your last 10 logged signals with entry, TP, and SL levels.
+
+**Step 9 — Manually track signal outcomes**
+
+For each signal your bot fires, note the time and price in a spreadsheet. Come back 5 hours later (20 candles at 15m) and check if it hit TP, SL, or neither. After 30–50 signals you will have real forward-test data to evaluate signal quality against the backtest.
+
+**Run this for a minimum of 7 days before considering any real capital.**
+
+---
+
+## PART C: Deploying to Railway for 24/7 Running
+
+Once local simulation is working cleanly, deploy it so it runs without your laptop being on.
+
+1. Create a GitHub repo, push all your files (excluding `.env` — add `.env` to `.gitignore`)
+2. Go to `railway.app`, sign up with GitHub, click New Project → Deploy from GitHub
+3. Select your repo. Railway detects Python automatically.
+4. Go to your project's Variables tab and add:
+   - `TELEGRAM_TOKEN` = your token
+   - `TELEGRAM_CHAT_ID` = your chat ID
+5. Railway will auto-deploy. Your bot sends you "Bot started" message when live.
+6. From this point forward, every code change you push to GitHub auto-redeploys.
+
+The SQLite database resets on each redeploy (Railway's filesystem is ephemeral). For persistent logs, replace SQLite with Railway's free PostgreSQL addon later. For now, CSV export from the SQLite before each redeploy is enough.
+
+---
+
+## Critical Anti-Hallucination Notes for AI Coding
+
+These are the exact things that will go wrong if an AI makes wrong assumptions:
+
+1. `python-telegram-bot v21` uses async. Every handler must be `async def`. There is no `Updater` class anymore. Use `Application.builder().token(TOKEN).build()`.
+2. pandas-ta MACD column names are `MACD_12_26_9`, `MACDs_12_26_9`, `MACDh_12_26_9`. Not `macd`, not `signal`, not `histogram`. If you name them differently, `KeyError` crashes the scorer.
+3. Bollinger Band lower column is `BBL_20_2.0` (with the decimal point in the name). Not `BBL_20_2`, not `bb_lower`.
+4. `df.ta.ema(length=50, append=True)` generates column `EMA_50`. `df.ta.ema(length=200, append=True)` generates `EMA_200`.
+5. Volume SMA is NOT generated by any pandas-ta function. You must do `df['VOL_SMA_20'] = df['volume'].rolling(20).mean()` manually.
+6. Never call indicator functions on a single row. Always pass the full DataFrame, then read `.iloc[-1]` after.
+7. `ccxt.binance({'options': {'defaultType': 'future'}})` — without this options dict, you get spot data, not futures data. The prices will be slightly different but the candles will mostly work. The issue is perpetual funding rates and futures-specific volume differ.
+8. `job_queue` only works if you install `python-telegram-bot[job-queue]` (with the bracket extras). Plain `pip install python-telegram-bot` without the extras will give you `None` for `context.job_queue`.

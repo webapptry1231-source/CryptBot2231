@@ -1,0 +1,632 @@
+
+
+# 🧠 DEFINITIVE MASTERPLAN: CryptoSignalBot
+
+## ARCHITECTURE
+
+```
+CryptoSignalBot/
+├── config.py            # All constants, coin list, weights, thresholds
+├── data_fetcher.py      # CCXT OHLCV fetch (paginated, historical + live)
+├── indicators.py        # pandas-ta computation (all column names explicit)
+├── scorer.py            # Pure scoring function (no class, stateless)
+├── backtester.py        # Walk-forward backtest engine
+├── signal_formatter.py  # Formats Telegram message strings
+├── trade_logger.py      # SQLite logging for simulation trades
+├── telegram_bot.py      # Bot commands + job_queue scheduler
+├── main.py              # Entry point
+├── .env                 # Secrets (never commit)
+├── requirements.txt
+└── Procfile
+```
+
+---
+
+## EXACT REQUIREMENTS.TXT
+
+```
+ccxt>=4.3.0
+pandas>=2.0.0
+pandas-ta==0.3.14b0
+numpy>=1.24.0
+python-telegram-bot[job-queue]==21.3.1
+python-dotenv>=1.0.0
+requests>=2.31.0
+```
+
+**Why these exact versions:** `pandas-ta==0.3.14b0` is the last stable release. `python-telegram-bot[job-queue]==21.3.1` includes APScheduler integration for the built-in job queue. The `[job-queue]` extra is critical — without it `context.job_queue` will be `None` and the scheduler will silently fail.
+
+---
+
+## config.py — Complete Constants
+
+```python
+# config.py
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+COINS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+    "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "TON/USDT"
+]
+
+TIMEFRAME = "15m"         # 15-minute candles
+CANDLES_NEEDED = 300      # Fetch 300 candles (EMA200 needs 200+, buffer for safety)
+SCAN_INTERVAL_SECONDS = 900  # Every 15 minutes
+
+# Scoring thresholds
+STRONG_SIGNAL_THRESHOLD = 75
+WEAK_SIGNAL_THRESHOLD = 60
+
+# Trade simulation parameters
+TP_PERCENT = 1.0          # Take profit at +1.0%
+SL_PERCENT = 0.5          # Stop loss at -0.5%
+MAX_HOLD_CANDLES = 20     # Max 20 candles = 5 hours at 15m before timeout exit
+FEE_PERCENT = 0.05        # 0.05% per side (Binance futures taker fee)
+
+SIMULATION_MODE = True    # NEVER change to False without proper testing
+```
+
+---
+
+## data_fetcher.py
+
+```python
+# data_fetcher.py
+import ccxt
+import pandas as pd
+import time
+
+exchange = ccxt.binance({
+    'enableRateLimit': True,
+    'options': {'defaultType': 'future'}
+})
+
+def fetch_ohlcv(symbol: str, timeframe: str = "15m", limit: int = 300) -> pd.DataFrame:
+    """
+    Fetch most recent `limit` candles for a symbol.
+    Used for live scanning. Returns DataFrame with columns:
+    timestamp (DatetimeIndex), open, high, low, close, volume
+    """
+    raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    df = pd.DataFrame(raw, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+    df.set_index('timestamp', inplace=True)
+    df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'volume': float})
+    return df
+
+def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int = 90) -> pd.DataFrame:
+    """
+    Paginated fetch for historical backtesting.
+    Fetches `days_back` days worth of candles.
+    """
+    since_ms = int((pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=days_back)).timestamp() * 1000)
+    all_candles = []
+
+    while True:
+        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=1000)
+        if not batch:
+            break
+        all_candles.extend(batch)
+        since_ms = batch[-1][0] + 1  # Move pointer forward by 1ms
+        time.sleep(exchange.rateLimit / 1000)
+        if len(batch) < 1000:
+            break
+
+    df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+    df.set_index('timestamp', inplace=True)
+    df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'volume': float})
+    df = df[~df.index.duplicated(keep='last')]  # Remove duplicate timestamps
+    return df
+```
+
+**Note for AI coders:** The `.astype()` call is mandatory. CCXT sometimes returns mixed types (int/float) in the OHLCV arrays. Without explicit casting, pandas-ta will throw `TypeError: unsupported operand type` on some indicators.
+
+---
+
+## indicators.py — Explicit Column Names
+
+This is the most critical file to get right. Every column name below is the exact string that `pandas-ta` generates. These are not configurable — they are hardcoded by the library.
+
+```python
+# indicators.py
+import pandas as pd
+import pandas_ta as ta
+
+def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Computes all required indicators on the DataFrame.
+    Returns a new DataFrame (does not mutate original).
+    
+    EXACT COLUMN NAMES GENERATED (critical for scorer.py):
+    - RSI_14
+    - MACD_12_26_9
+    - MACDh_12_26_9   (histogram)
+    - MACDs_12_26_9   (signal line)
+    - EMA_50
+    - EMA_200
+    - BBL_20_2.0      (lower band)
+    - BBM_20_2.0      (middle band)
+    - BBU_20_2.0      (upper band)
+    - VOL_SMA_20      (manual rolling mean — pandas-ta does not generate this)
+    """
+    df = df.copy()  # NEVER mutate the original DataFrame
+
+    df.ta.rsi(length=14, append=True)
+    df.ta.macd(fast=12, slow=26, signal=9, append=True)
+    df.ta.ema(length=50, append=True)
+    df.ta.ema(length=200, append=True)
+    df.ta.bbands(length=20, std=2.0, append=True)
+
+    # Volume SMA — must be manual; pandas-ta doesn't generate 'volume_sma_20'
+    df['VOL_SMA_20'] = df['volume'].rolling(window=20).mean()
+
+    df.dropna(inplace=True)  # Remove rows where indicators couldn't compute (first N rows)
+    return df
+```
+
+---
+
+## scorer.py — The Brain
+
+This is a **pure function** (no class, no state). Takes a fully-computed DataFrame, reads only the last row, returns an integer score and direction string.
+
+```python
+# scorer.py
+import pandas as pd
+
+def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
+    """
+    Computes a confidence score 0-100 for a LONG signal.
+    
+    Returns: (score: int, reason: str)
+    
+    REQUIRES df to already have indicators computed by indicators.py.
+    df must have at least 2 rows ([-1] and [-2] used for crossover detection).
+    """
+    if len(df) < 2:
+        return 0, "insufficient_data"
+
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+    score = 0
+    reasons = []
+
+    # ────────────────────────────────────────────────
+    # COMPONENT 1: TREND FILTER (max 40 points)
+    # Primary gatekeeper. No signal if trend is bearish.
+    # Uses EMA200 as the long-term trend anchor.
+    # ────────────────────────────────────────────────
+    if latest['close'] > latest['EMA_200']:
+        score += 20
+        reasons.append("price>EMA200")
+    
+    if latest['EMA_50'] > latest['EMA_200']:  # Golden zone
+        score += 20
+        reasons.append("EMA50>EMA200")
+
+    # ────────────────────────────────────────────────
+    # COMPONENT 2: MOMENTUM (max 35 points)
+    # RSI oversold condition + MACD bullish crossover
+    # ────────────────────────────────────────────────
+    rsi = latest['RSI_14']
+    if rsi < 30:
+        score += 20
+        reasons.append("RSI_oversold")
+    elif rsi < 45:
+        score += 10
+        reasons.append("RSI_recovering")
+
+    # MACD bullish crossover: MACD line crosses above signal line
+    # Check: prev candle MACD was below signal, current candle is above
+    macd_cross = (
+        prev['MACD_12_26_9'] <= prev['MACDs_12_26_9'] and
+        latest['MACD_12_26_9'] > latest['MACDs_12_26_9']
+    )
+    if macd_cross:
+        score += 15
+        reasons.append("MACD_crossover")
+    elif latest['MACDh_12_26_9'] > 0 and prev['MACDh_12_26_9'] <= 0:
+        # Histogram turned positive (slightly weaker signal, partial credit)
+        score += 8
+        reasons.append("MACD_hist_positive")
+
+    # ────────────────────────────────────────────────
+    # COMPONENT 3: VOLATILITY / EXTREMES (max 15 points)
+    # Bollinger Band lower touch = price at statistical extreme
+    # ────────────────────────────────────────────────
+    if latest['close'] <= latest['BBL_20_2.0']:
+        score += 15
+        reasons.append("BB_lower_touch")
+    elif latest['close'] >= latest['BBU_20_2.0']:
+        score -= 10  # Overextended — penalty for LONG entry
+        reasons.append("BB_upper_penalty")
+
+    # ────────────────────────────────────────────────
+    # COMPONENT 4: VOLUME CONFIRMATION (max 10 points)
+    # High volume validates the move. Low volume = trap.
+    # ────────────────────────────────────────────────
+    if latest['VOL_SMA_20'] > 0 and latest['volume'] > 1.5 * latest['VOL_SMA_20']:
+        score += 10
+        reasons.append("volume_spike")
+
+    score = max(0, min(100, score))  # Clamp to [0, 100]
+    reason_str = " + ".join(reasons) if reasons else "no_signal"
+    return score, reason_str
+```
+
+**Score breakdown:** Trend 40 + Momentum 35 + Volatility 15 + Volume 10 = 100 max. The Bollinger penalty (-10) means an overextended price at the upper band will never reach 75 threshold on its own. This is intentional — it prevents chasing breakouts.
+
+---
+
+## backtester.py — Walk-Forward Engine
+
+This replaces VectorBT entirely. No extra dependencies, full transparency.
+
+```python
+# backtester.py
+import pandas as pd
+from config import (COINS, TIMEFRAME, TP_PERCENT, SL_PERCENT,
+                    MAX_HOLD_CANDLES, FEE_PERCENT, STRONG_SIGNAL_THRESHOLD)
+from data_fetcher import fetch_historical_ohlcv
+from indicators import compute_indicators
+from scorer import calculate_score
+
+LOOKBACK = 250  # Candles of history needed to compute indicators (EMA200 needs 200+)
+
+def backtest_coin(symbol: str, days_back: int = 90) -> dict:
+    """
+    Walk-forward backtest for a single coin.
+    
+    For each candle from index LOOKBACK onwards:
+      1. Slice df[i-LOOKBACK:i] (never peek ahead)
+      2. Compute indicators on that slice
+      3. Score the last candle
+      4. If score >= threshold: open a simulated trade at close[i]
+      5. Walk forward until TP, SL, or MAX_HOLD_CANDLES
+      6. Record result
+    """
+    print(f"Fetching {days_back} days of {TIMEFRAME} data for {symbol}...")
+    raw_df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days_back)
+
+    trades = []
+    i = LOOKBACK
+
+    while i < len(raw_df):
+        window = raw_df.iloc[i - LOOKBACK: i]
+        df_with_indicators = compute_indicators(window)
+
+        if len(df_with_indicators) < 2:
+            i += 1
+            continue
+
+        score, reason = calculate_score(df_with_indicators)
+
+        if score >= STRONG_SIGNAL_THRESHOLD:
+            entry_price = raw_df.iloc[i]['close']
+            tp_price = entry_price * (1 + TP_PERCENT / 100)
+            sl_price = entry_price * (1 - SL_PERCENT / 100)
+            entry_time = raw_df.index[i]
+            outcome = "TIMEOUT"
+            exit_price = entry_price
+            hold_candles = 0
+
+            # Walk forward to find exit
+            for j in range(i + 1, min(i + 1 + MAX_HOLD_CANDLES, len(raw_df))):
+                candle_high = raw_df.iloc[j]['high']
+                candle_low = raw_df.iloc[j]['low']
+                hold_candles += 1
+
+                if candle_high >= tp_price:
+                    outcome = "TP"
+                    exit_price = tp_price
+                    break
+                elif candle_low <= sl_price:
+                    outcome = "SL"
+                    exit_price = sl_price
+                    break
+
+            if outcome == "TIMEOUT":
+                exit_price = raw_df.iloc[min(i + MAX_HOLD_CANDLES, len(raw_df) - 1)]['close']
+
+            gross_pnl = (exit_price - entry_price) / entry_price * 100
+            net_pnl = gross_pnl - (FEE_PERCENT * 2)  # Entry + exit fee
+
+            trades.append({
+                'symbol': symbol,
+                'entry_time': entry_time,
+                'entry_price': entry_price,
+                'exit_price': exit_price,
+                'outcome': outcome,
+                'gross_pnl_pct': round(gross_pnl, 4),
+                'net_pnl_pct': round(net_pnl, 4),
+                'score': score,
+                'reason': reason,
+                'hold_candles': hold_candles
+            })
+
+            i += hold_candles + 1  # Skip to after this trade closes
+        else:
+            i += 1
+
+    return compute_metrics(symbol, trades)
+
+def compute_metrics(symbol: str, trades: list) -> dict:
+    if not trades:
+        return {'symbol': symbol, 'total_trades': 0}
+
+    df = pd.DataFrame(trades)
+    wins = df[df['outcome'] == 'TP']
+    losses = df[df['outcome'] == 'SL']
+
+    total_profit = wins['net_pnl_pct'].sum()
+    total_loss = abs(losses['net_pnl_pct'].sum())
+    win_rate = len(wins) / len(df) * 100 if len(df) > 0 else 0
+    profit_factor = total_profit / total_loss if total_loss > 0 else float('inf')
+
+    # Max drawdown: cumulative sum of net PnL, find biggest drop from peak
+    cumulative = df['net_pnl_pct'].cumsum()
+    rolling_max = cumulative.cummax()
+    drawdown = (cumulative - rolling_max)
+    max_drawdown = drawdown.min()
+
+    return {
+        'symbol': symbol,
+        'total_trades': len(df),
+        'win_rate_pct': round(win_rate, 2),
+        'total_return_pct': round(df['net_pnl_pct'].sum(), 4),
+        'profit_factor': round(profit_factor, 3),
+        'max_drawdown_pct': round(max_drawdown, 4),
+        'avg_hold_candles': round(df['hold_candles'].mean(), 1),
+        'trades': trades
+    }
+
+def run_full_backtest(days_back: int = 90):
+    """Run backtest on all coins and print summary."""
+    results = []
+    for coin in COINS:
+        try:
+            result = backtest_coin(coin, days_back=days_back)
+            results.append(result)
+            print(f"  {coin}: {result['total_trades']} trades | "
+                  f"WR: {result.get('win_rate_pct', 0):.1f}% | "
+                  f"Return: {result.get('total_return_pct', 0):.2f}% | "
+                  f"MaxDD: {result.get('max_drawdown_pct', 0):.2f}%")
+        except Exception as e:
+            print(f"  {coin}: ERROR — {e}")
+    return results
+```
+
+---
+
+## signal_formatter.py
+
+```python
+# signal_formatter.py
+from config import STRONG_SIGNAL_THRESHOLD, WEAK_SIGNAL_THRESHOLD, TP_PERCENT, SL_PERCENT
+
+def format_signal_message(symbol: str, score: int, reason: str, price: float) -> str | None:
+    """
+    Returns a formatted Telegram message string if signal is actionable.
+    Returns None if score is below threshold (no message sent).
+    """
+    tp = round(price * (1 + TP_PERCENT / 100), 4)
+    sl = round(price * (1 - SL_PERCENT / 100), 4)
+
+    if score >= STRONG_SIGNAL_THRESHOLD:
+        emoji = "🔥"
+        label = "STRONG LONG"
+        leverage = "2-5x leverage"
+    elif score >= WEAK_SIGNAL_THRESHOLD:
+        emoji = "👀"
+        label = "WATCH / Weak Long"
+        leverage = "1-2x only"
+    else:
+        return None  # No message below threshold
+
+    tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol.replace('/', '')}"
+
+    return (
+        f"{emoji} {symbol} (15m Futures)\n"
+        f"Score: {score}/100\n"
+        f"Signal: {label} ({leverage})\n"
+        f"Reason: {reason}\n"
+        f"Entry: ~{price}\n"
+        f"TP: {tp} (+{TP_PERCENT}%)\n"
+        f"SL: {sl} (-{SL_PERCENT}%)\n"
+        f"Chart: {tv_link}\n"
+        f"⚠️ SIMULATION MODE — NO REAL TRADE"
+    )
+```
+
+---
+
+## trade_logger.py — SQLite
+
+```python
+# trade_logger.py
+import sqlite3
+import os
+from datetime import datetime
+
+DB_PATH = "logs/trades.db"
+
+def init_db():
+    os.makedirs("logs", exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            symbol TEXT,
+            score INTEGER,
+            reason TEXT,
+            entry_price REAL,
+            tp_price REAL,
+            sl_price REAL,
+            mode TEXT DEFAULT 'SIMULATION'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def log_signal(symbol: str, score: int, reason: str, entry: float, tp: float, sl: float):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO signals (timestamp, symbol, score, reason, entry_price, tp_price, sl_price) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (datetime.utcnow().isoformat(), symbol, score, reason, entry, tp, sl)
+    )
+    conn.commit()
+    conn.close()
+```
+
+---
+
+## telegram_bot.py — Full v21 Async Architecture
+
+This is the most version-sensitive file. `python-telegram-bot v21` is async throughout. Plans 1 and 2 use v13 patterns which will not work here.
+
+```python
+# telegram_bot.py
+import asyncio
+import logging
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
+                    TIMEFRAME, CANDLES_NEEDED, SCAN_INTERVAL_SECONDS, SIMULATION_MODE)
+from data_fetcher import fetch_ohlcv
+from indicators import compute_indicators
+from scorer import calculate_score
+from signal_formatter import format_signal_message
+from trade_logger import init_db, log_signal
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ────────────────────────────────────────────────
+# CORE SCAN FUNCTION (used by both commands and scheduler)
+# ────────────────────────────────────────────────
+async def scan_all_coins(send_func) -> list[str]:
+    """
+    Scans all coins. For each signal found, calls send_func(message).
+    Returns list of messages sent.
+    """
+    messages = []
+    for symbol in COINS:
+        try:
+            df = fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=CANDLES_NEEDED)
+            df = compute_indicators(df)
+            score, reason = calculate_score(df)
+            price = df.iloc[-1]['close']
+            msg = format_signal_message(symbol, score, reason, price)
+            if msg:
+                await send_func(msg)
+                messages.append(msg)
+                tp = round(price * 1.01, 4)
+                sl = round(price * 0.995, 4)
+                log_signal(symbol, score, reason, price, tp, sl)
+        except Exception as e:
+            logger.error(f"Error scanning {symbol}: {e}")
+    return messages
+
+# ────────────────────────────────────────────────
+# TELEGRAM COMMAND HANDLERS
+# ────────────────────────────────────────────────
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mode = "SIMULATION" if SIMULATION_MODE else "LIVE"
+    await update.message.reply_text(
+        f"✅ CryptoSignalBot is running\n"
+        f"Mode: {mode}\n"
+        f"Timeframe: {TIMEFRAME}\n"
+        f"Coins: {len(COINS)}\n"
+        f"Use /scan to scan all coins now."
+    )
+
+async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔍 Scanning all coins...")
+
+    async def reply(msg: str):
+        await update.message.reply_text(msg)
+
+    found = await scan_all_coins(reply)
+    if not found:
+        await update.message.reply_text("No signals above threshold. Market may be quiet.")
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "/start — bot status\n"
+        "/scan — scan all coins now\n"
+        "/help — this message\n"
+        "\nBot auto-scans every 15 minutes."
+    )
+
+# ────────────────────────────────────────────────
+# SCHEDULED JOB (runs via job_queue every 15 min)
+# ────────────────────────────────────────────────
+async def scheduled_scan(context: ContextTypes.DEFAULT_TYPE):
+    """This function is called by the job_queue every SCAN_INTERVAL_SECONDS."""
+    bot = context.bot
+
+    async def send_to_chat(msg: str):
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
+
+    await scan_all_coins(send_to_chat)
+
+# ────────────────────────────────────────────────
+# MAIN — Build and start the bot
+# ────────────────────────────────────────────────
+def main():
+    init_db()
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("scan", cmd_scan))
+    app.add_handler(CommandHandler("help", cmd_help))
+
+    # Schedule the auto-scan job
+    # first=10 means wait 10 seconds after bot starts before first scan
+    app.job_queue.run_repeating(scheduled_scan, interval=SCAN_INTERVAL_SECONDS, first=10)
+
+    logger.info("Bot started. Polling for updates...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## main.py
+
+```python
+# main.py
+from telegram_bot import main
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## Procfile
+
+```
+worker: python main.py
+```
+
+---
+
+## .env template
+
+```
+TELEGRAM_TOKEN=your_token_from_botfather_here
+TELEGRAM_CHAT_ID=your_numeric_chat_id_here
+```
+
+
