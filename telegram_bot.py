@@ -32,7 +32,9 @@ async def scan_all_coins(send_func) -> list[str]:
             logger.error(f"Error scanning {symbol}: {e}")
             logger.info(f"Traceback:", exc_info=True)
         else:
-            logger.info(f"DEBUG: {symbol} - score={score}, reason={reason}, price={price}")
+            logger.info(f"RESULT: {symbol} - score={score}, reason={reason}, price={price}")
+            if score >= WEAK_SIGNAL_THRESHOLD:
+                logger.info(f"SIGNAL: {symbol} qualifies with score {score}")
     return messages
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
