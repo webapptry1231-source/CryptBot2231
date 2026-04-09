@@ -47,6 +47,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 continue
                 
             score, reason = calculate_score(window)
+            
+            if score < WEAK_SIGNAL_THRESHOLD:
+                continue
             entry_price = window.iloc[-1]['close']
             
             future = df.iloc[i:i+24]
