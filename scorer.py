@@ -98,7 +98,7 @@ def calculate_score(df: pd.DataFrame, trend_bonus: int = 0, direction: str = "LO
             reasons.append("MACD_hist_negative")
     
     # Penalize high-score MACD crossovers (exhaustion trap)
-    if ("MACD_crossover" in reasons or "MACD_crossdown" in reasons) and score > 75:
+    if ("MACD_crossover" in reasons or "MACD_crossdown" in reasons) and score > 80:
         score -= 15
         reasons.append("MACD_exhaustion_penalty")
 

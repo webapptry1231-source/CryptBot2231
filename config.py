@@ -8,8 +8,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 BTC_ONLY = os.getenv("BTC_ONLY", "false").lower() == "true"
 
 COINS = ["BTC/USDT"] if BTC_ONLY else [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
-    "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "TON/USDT"
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT",
+    "DOGE/USDT", "LINK/USDT", "TON/USDT"
 ]
 
 TIMEFRAME     = "15m"
@@ -21,7 +21,9 @@ SCAN_INTERVAL_SECONDS = 900
 # WEAK_SIGNAL_THRESHOLD : minimum score to qualify as a signal at all
 # STRONG_SIGNAL_THRESHOLD: score that earns "STRONG" label in Telegram message
 WEAK_SIGNAL_THRESHOLD   = 65
-STRONG_SIGNAL_THRESHOLD = 78   # lowered from 80; 80 was unreachable on most days
+STRONG_SIGNAL_THRESHOLD = 78
+TOXIC_ZONE_MIN = 87    # Scores in this range are filtered out
+TOXIC_ZONE_MAX = 89    # Also 91-93 filtered
 
 # ── Session windows (UTC hours, inclusive start, exclusive end) ──────────────
 # The engine picks the single BEST-scoring candle inside each session.
@@ -33,7 +35,7 @@ SESSION_AFTERNOON_END   = 22  # 22:00 UTC  (exclusive → last candle at 21:45)
 
 # Minimum score a session's best candle must reach to actually fire a signal.
 # Keeps quality high; prevents scraping the barrel on quiet days.
-SESSION_MIN_SCORE = 68
+SESSION_MIN_SCORE = 73
 
 # ── Long settings ────────────────────────────────────────────────────────────
 TP_LONG_PERCENT    = 2.0
@@ -48,7 +50,7 @@ TRAIL_ACTIVATE_SHORT = 1.0
 MAX_HOLD_CANDLES_SHORT = 24   # 6 hours
 
 # ── Trailing stop ────────────────────────────────────────────────────────────
-TRAILING_STOP_PERCENT = 0.4   # single definition — no more double-assignment bug
+TRAILING_STOP_PERCENT = 0.8   # allow trade to breathe
 
 # ── ATR-based SL/TP (adaptive sizing) ────────────────────────────────────────
 ENABLE_ATR_SL    = os.getenv("ENABLE_ATR_SL", "true").lower() == "true"
@@ -74,10 +76,13 @@ HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "90"))
 # ── Risk controls ────────────────────────────────────────────────────────────
 MAX_CONCURRENT_TRADES  = 3
 SIGNAL_COOLDOWN_HOURS  = 0.5    # minimum gap between signals for same symbol
+SAME_COIN_COOLDOWN_MIN = 60     # 60-minute lockout per coin after any trade
 DAILY_LOSS_CAP         = 3      # stop trading a symbol after 3 losses in a day
 CONSECUTIVE_SL_STOP    = 3      # halt entire scan after 3 consecutive SL hits
 TRADE_HOURS_START      = 6      # UTC — no trades before this hour
 TRADE_HOURS_END        = 22     # UTC — no trades at/after this hour
+TRADE_HOURS_BLACKOUT_START = 13.75  # 13:45 UTC - no trade zone
+TRADE_HOURS_BLACKOUT_END   = 16     # 16:00 UTC - no trade zone
 NEUTRAL_ZONE_PCT       = 0.5    # % band around EMA200 = sleep zone
 TRADE_DAYS_BLOCKED     = [5]    # 5 = Saturday (Sunday=6 not blocked)
 

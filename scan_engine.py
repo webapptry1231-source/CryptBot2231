@@ -44,19 +44,25 @@ from config import (
     MAX_HOLD_CANDLES_LONG, MAX_HOLD_CANDLES_SHORT,
     TRAILING_STOP_PERCENT, LEVERAGE, BUY_AMOUNT,
     SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
+    TRADE_HOURS_BLACKOUT_START, TRADE_HOURS_BLACKOUT_END,
     NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED, SL_OVERRIDES,
     FEE_PERCENT, DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP,
     ENABLE_ATR_SL, ATR_SL_MULTIPLIER, ATR_TP_RR, ATR_SL_MIN_PCT, ATR_SL_MAX_PCT,
     SCAN_DATE,
     SESSION_MORNING_START, SESSION_MORNING_END,
     SESSION_AFTERNOON_START, SESSION_AFTERNOON_END,
-    SESSION_MIN_SCORE,
+    SESSION_MIN_SCORE, TOXIC_ZONE_MIN, TOXIC_ZONE_MAX,
+    SAME_COIN_COOLDOWN_MIN,
+    PARTIAL_TP_PERCENT, PARTIAL_TP_SIZE, TIMEOUT_HOURS,
 )
 
 logger = logging.getLogger(__name__)
 
 # ── In-memory 4h data cache (cleared by caller before each full run) ─────────
 _4h_cache: dict = {}
+
+# Same-coin cooldown tracker: {symbol: last_trade_time}
+_last_trade_time: dict = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,6 +190,10 @@ def _collect_session_candidates(
         # Trade hours gate
         if hour < TRADE_HOURS_START or hour >= TRADE_HOURS_END:
             continue
+        
+        # Time-window blackout (13:45 - 16:00 UTC)
+        if TRADE_HOURS_BLACKOUT_START <= hour < TRADE_HOURS_BLACKOUT_END:
+            continue
 
         # Blocked days gate (only Saturday blocked by default)
         if current_time.weekday() in TRADE_DAYS_BLOCKED:
@@ -224,6 +234,19 @@ def _collect_session_candidates(
         bb_width_pct = (latest['BBU_20_2'] - latest['BBL_20_2']) / latest['close'] * 100
         if bb_width_pct > 4.0:   # >4% Bollinger width = chop
             continue
+
+        # Toxic Zone filter: skip scores 87-89 and 91-93
+        if (TOXIC_ZONE_MIN <= score <= TOXIC_ZONE_MAX) or (91 <= score <= 93):
+            continue
+
+        # Macro Regime Filter: Price vs Daily EMA50
+        daily_ema50 = latest.get('EMA_50')
+        if daily_ema50:
+            current_price = latest['close']
+            if direction == "LONG" and current_price < daily_ema50:
+                continue  # Block LONG when price below daily EMA50
+            if direction == "SHORT" and current_price > daily_ema50:
+                continue  # Block SHORT when price above daily EMA50
 
         if score >= SESSION_MIN_SCORE:
             candidates[sess].append({
@@ -269,9 +292,16 @@ def _simulate_trade(
         trail_activate = TRAIL_ACTIVATE_SHORT
         max_hold       = MAX_HOLD_CANDLES_SHORT
 
-    # Entry price with slippage
-    entry_price = float(df.iloc[i]['close']) * (1.001 if direction == "LONG" else 0.999)
-    current_time = df.index[i]
+    # Entry at NEXT candle open (not signal candle close)
+    # This avoids 0.0h instant SL hits
+    if i + 1 >= len(df):
+        return None
+    entry_price = float(df.iloc[i + 1]['open'])
+    current_time = df.index[i + 1]  # Entry happens at next candle
+    
+    # Check timeout (3 hours = 12 candles on 15m)
+    max_candles_timeout = int(TIMEOUT_HOURS * 60 / 15)  # 12 candles
+    hold_candles = min(max_hold, total_candles - i - 1, max_candles_timeout)
 
     # ATR-based adaptive SL/TP with clamping
     if ENABLE_ATR_SL:
@@ -289,11 +319,11 @@ def _simulate_trade(
     if direction == "LONG":
         tp_price         = entry_price * (1 + tp_percent    / 100)
         sl_price         = entry_price * (1 - sl_percent    / 100)
-        partial_tp_price = entry_price * (1 + trail_activate / 100)
+        partial_tp_price = entry_price * (1 + PARTIAL_TP_PERCENT / 100)  # 1% partial TP
     else:
         tp_price         = entry_price * (1 - tp_percent    / 100)
         sl_price         = entry_price * (1 + sl_percent    / 100)
-        partial_tp_price = entry_price * (1 - trail_activate / 100)
+        partial_tp_price = entry_price * (1 - PARTIAL_TP_PERCENT / 100)  # 1% partial TP
 
     hold_candles = min(max_hold, total_candles - i - 1)
     future       = df.iloc[i: i + hold_candles]
@@ -308,6 +338,7 @@ def _simulate_trade(
 
     # ── Candle-by-candle trade simulation ────────────────────────────────────
     partial_tp_hit = False
+    position_closed_50 = False  # Flag for partial close at 50%
     trailing_sl    = sl_price
     running_high   = entry_price
     running_low    = entry_price
@@ -315,6 +346,7 @@ def _simulate_trade(
     exit_price     = entry_price
     exit_time      = current_time
     pnl_pct        = 0.0
+    pnl_50_percent = 0.0  # PnL from the 50% that was closed at partial TP
     result         = "PENDING"
 
     for j in range(len(future)):
@@ -323,18 +355,25 @@ def _simulate_trade(
         if direction == "LONG":
             running_high = max(running_high, float(candle['high']))
 
-            # Partial TP / trail activation
+            # Partial TP at PARTIAL_TP_PERCENT (1%) - close 50%, move SL to breakeven
             if not partial_tp_hit and float(candle['high']) >= partial_tp_price:
                 partial_tp_hit = True
-                trailing_sl = entry_price   # move SL to breakeven
+                # Close 50% of position at this price
+                closed_50_price = partial_tp_price
+                pnl_50_percent = (PARTIAL_TP_SIZE * (closed_50_price - entry_price) / entry_price * 100 * LEVERAGE)
+                position_closed_50 = True
+                # Move SL to breakeven for remaining 50%
+                trailing_sl = entry_price
 
+            # Trail for remaining 50%
             if partial_tp_hit:
                 new_trail = running_high * (1 - TRAILING_STOP_PERCENT / 100)
                 trailing_sl = max(trailing_sl, new_trail)
 
             # Check TP (requires partial hit first)
             if partial_tp_hit and float(candle['high']) >= tp_price:
-                pnl_pct      = tp_percent * LEVERAGE
+                remaining_pnl = (1 - PARTIAL_TP_SIZE) * tp_percent * LEVERAGE
+                pnl_pct      = pnl_50_percent + remaining_pnl
                 result       = "TP HIT"
                 exit_price   = tp_price
                 exit_time    = future.index[j]
@@ -347,7 +386,8 @@ def _simulate_trade(
                 exit_time    = future.index[j]
                 trade_closed = True
                 if partial_tp_hit:
-                    pnl_pct = ((trailing_sl - entry_price) / entry_price) * 100 * LEVERAGE
+                    remaining_pnl = (1 - PARTIAL_TP_SIZE) * ((trailing_sl - entry_price) / entry_price) * 100 * LEVERAGE
+                    pnl_pct = pnl_50_percent + remaining_pnl
                     result  = "TRAIL STOP"
                 else:
                     pnl_pct = -sl_percent * LEVERAGE
@@ -357,16 +397,21 @@ def _simulate_trade(
         else:  # SHORT
             running_low = float(candle['low']) if j == 0 else min(running_low, float(candle['low']))
 
+            # Partial TP at PARTIAL_TP_PERCENT (1%) - close 50%, move SL to breakeven
             if not partial_tp_hit and float(candle['low']) <= partial_tp_price:
                 partial_tp_hit = True
-                trailing_sl = entry_price   # move SL to breakeven
+                closed_50_price = partial_tp_price
+                pnl_50_percent = (PARTIAL_TP_SIZE * (entry_price - closed_50_price) / entry_price * 100 * LEVERAGE)
+                position_closed_50 = True
+                trailing_sl = entry_price  # move SL to breakeven
 
             if partial_tp_hit:
                 new_trail = running_low * (1 + TRAILING_STOP_PERCENT / 100)
                 trailing_sl = min(trailing_sl, new_trail)
 
             if partial_tp_hit and float(candle['low']) <= tp_price:
-                pnl_pct      = tp_percent * LEVERAGE
+                remaining_pnl = (1 - PARTIAL_TP_SIZE) * tp_percent * LEVERAGE
+                pnl_pct      = pnl_50_percent + remaining_pnl
                 result       = "TP HIT"
                 exit_price   = tp_price
                 exit_time    = future.index[j]
@@ -378,7 +423,8 @@ def _simulate_trade(
                 exit_time    = future.index[j]
                 trade_closed = True
                 if partial_tp_hit:
-                    pnl_pct = ((entry_price - trailing_sl) / entry_price) * 100 * LEVERAGE
+                    remaining_pnl = (1 - PARTIAL_TP_SIZE) * ((entry_price - trailing_sl) / entry_price) * 100 * LEVERAGE
+                    pnl_pct = pnl_50_percent + remaining_pnl
                     result  = "TRAIL STOP"
                 else:
                     pnl_pct = -sl_percent * LEVERAGE
@@ -391,9 +437,11 @@ def _simulate_trade(
         exit_price   = float(df.iloc[timeout_idx]['close'])
         exit_time    = df.index[timeout_idx]
         if direction == "LONG":
-            pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
+            remaining_pnl = (1 - PARTIAL_TP_SIZE) * ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
+            pnl_pct = pnl_50_percent + remaining_pnl
         else:
-            pnl_pct = ((entry_price - exit_price) / entry_price) * 100 * LEVERAGE
+            remaining_pnl = (1 - PARTIAL_TP_SIZE) * ((entry_price - exit_price) / entry_price) * 100 * LEVERAGE
+            pnl_pct = pnl_50_percent + remaining_pnl
         result = "TIMEOUT"
 
     hold_hours         = (exit_time - current_time).total_seconds() / 3600
@@ -531,6 +579,15 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
                 if daily_losses[date_str] >= DAILY_LOSS_CAP:
                     break
 
+                # Same-coin cooldown check (60 minutes)
+                current_trade_time = df.index[sig["idx"]]
+                last_trade = _last_trade_time.get(symbol)
+                if last_trade is not None:
+                    hours_since_last = (current_trade_time - last_trade).total_seconds() / 3600
+                    if hours_since_last < (SAME_COIN_COOLDOWN_MIN / 60):
+                        logger.info(f"SKIP {symbol}: same-coin cooldown ({hours_since_last:.1f}h < 1h)")
+                        continue
+
                 trade = _simulate_trade(
                     df       = df,
                     i        = sig["idx"],
@@ -559,6 +616,9 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
                 )
 
                 all_results.append(trade)
+                
+                # Record trade time for cooldown
+                _last_trade_time[symbol] = current_trade_time
 
         logger.info(
             f"=== SCAN DONE | {symbol} | "
