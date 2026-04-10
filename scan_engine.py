@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timedelta
 from data_fetcher import fetch_historical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
@@ -10,7 +9,6 @@ from config import (TIMEFRAME, TIMEFRAME_4H, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRES
                    PARTIAL_TP_PERCENT, PARTIAL_TP_SIZE, TRAILING_STOP_PERCENT, FEE_PERCENT)
 
 logger = logging.getLogger(__name__)
-MAX_OPEN_TRADES = 3
 
 def check_4h_trend(symbol: str) -> bool:
     try:
@@ -19,35 +17,38 @@ def check_4h_trend(symbol: str) -> bool:
             return True
         df_4h = compute_indicators(df_4h)
         latest = df_4h.iloc[-1]
-        return latest['close'] > latest['EMA_200']
+        result = latest['close'] > latest['EMA_200']
+        logger.info(f"  4h check: {len(df_4h)} candles, EMA200={latest['EMA_200']:.2f}, close={latest['close']:.2f} -> {'BULLISH' if result else 'BEARISH'}")
+        return result
     except Exception as e:
         logger.warning(f"4h trend check failed: {e}")
         return True
 
 def scan_daily_historical(symbol: str, days: int) -> list:
     try:
-        logger.info(f"Fetching {days} days of historical data for {symbol}")
+        logger.info(f"=== Starting scan for {symbol}, {days} days ===")
         df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
         logger.info(f"Fetched {len(df)} candles")
         
         if len(df) < 100:
-            logger.warning(f"Not enough candles: {len(df)}")
+            logger.warning(f"Not enough data: {len(df)}")
             return []
         
         df = compute_indicators(df)
-        logger.info(f"Indicators computed, {len(df)} rows")
+        logger.info(f"Indicators computed: {len(df)} rows")
         
         results = []
         total_candles = len(df)
         
         trend_bullish = check_4h_trend(symbol)
-        logger.info(f"4h trend check: {'BULLISH' if trend_bullish else 'BEARISH'}")
         
         trades_per_day = {}
         last_signal_time = {}
         total_scanned = 0
         signals_found = 0
         scan_start_time = df.index[0]
+        
+        logger.info(f"Scan config: WEAK_THRESHOLD={WEAK_SIGNAL_THRESHOLD}, COOLDOWN={SIGNAL_COOLDOWN_HOURS}, DAILY_CAP={DAILY_TRADE_CAP}")
         
         for i in range(24, total_candles - MAX_HOLD_CANDLES):
             current_time = df.index[i]
@@ -59,6 +60,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             
             total_scanned += 1
             
+            if total_scanned % 200 == 0:
+                logger.info(f"Progress: {total_scanned}/{total_candles} candles, signals: {signals_found}")
+            
             if not trend_bullish:
                 continue
             
@@ -66,67 +70,35 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if len(window) < 50:
                 continue
             
-            score, reason = calculate_score(window)
-            
-            if score < WEAK_SIGNAL_THRESHOLD:
-                continue
-            
-            if "low_volume" in reason:
-                continue
-            
             entry_time = window.index[-1]
             entry_hour = entry_time.hour
             
-            logger.info(f"Checking candle {i}: hour={entry_hour}, trend={trend_bullish}, time_window={TRADE_HOURS_START}-{TRADE_HOURS_END}")
-            
-            if entry_hour < TRADE_HOURS_START or entry_hour >= TRADE_HOURS_END:
-                logger.info(f"  -> Skip: outside time window")
-                continue
-            
-            if not trend_bullish:
-                logger.info(f"  -> Skip: 4h trend bearish")
-                continue
-            
             score, reason = calculate_score(window)
             
-            if score >= 70:
-                logger.info(f"Near-signal: score={score}, reason={reason}")
+            if total_scanned < 50:
+                logger.info(f"Candle {i} [{entry_time}]: score={score}, reason='{reason}'")
             
             if score < WEAK_SIGNAL_THRESHOLD:
-                logger.info(f"  -> Skip: score below threshold {WEAK_SIGNAL_THRESHOLD}")
                 continue
             
             if "low_volume" in reason:
-                logger.info(f"  -> Skip: low volume")
+                logger.info(f"Candle {i}: low_volume blocked (score={score})")
                 continue
-            
-            last_signal = last_signal_time.get(symbol)
-            if last_signal and (entry_time - last_signal).total_seconds() < (SIGNAL_COOLDOWN_HOURS * 3600):
-                logger.info(f"  -> Skip: cooldown active")
-                continue
-            
-            day_date = str(entry_time)[:10]
-            if day_date not in trades_per_day:
-                trades_per_day[day_date] = 0
-            if trades_per_day[day_date] >= DAILY_TRADE_CAP:
-                continue
-            trades_per_day[day_date] += 1
             
             signals_found += 1
             last_signal_time[symbol] = entry_time
-            total_concurrent += 1
             
             entry_price = window.iloc[-1]['close']
             entry_price = entry_price * 1.001
-            open_positions.add(symbol)
             
             hold_candles = min(MAX_HOLD_CANDLES, total_candles - i - 1)
             if hold_candles < 1:
+                logger.warning(f"Candle {i}: no future candles to evaluate")
                 continue
+            
             future = df.iloc[i:i+hold_candles]
             if len(future) == 0:
-                open_positions.discard(symbol)
-                total_concurrent = max(0, total_concurrent - 1)
+                logger.warning(f"Candle {i}: empty future data")
                 continue
             
             mfe = future['high'].max()
@@ -165,8 +137,6 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                     result = "TP HIT"
                     exit_price = future.iloc[j]['high']
                     exit_time = future.index[j]
-                    hold_hours = (exit_time - entry_time).total_seconds() / 3600
-                    trade_closed = True
                     break
                 
                 if candle['low'] <= trailing_sl:
@@ -178,14 +148,9 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                         result = "SL HIT"
                     exit_price = candle['low']
                     exit_time = future.index[j]
-                    hold_hours = (exit_time - entry_time).total_seconds() / 3600
-                    trade_closed = True
                     break
             
             if not trade_closed:
-                if exit_price is None:
-                    exit_price = future.iloc[-1]['close'] * 0.999
-                    exit_time = future.index[-1]
                 if exit_price > entry_price:
                     pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
                     result = "PROFIT"
@@ -194,9 +159,6 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                     result = "LOSS"
             
             hold_hours = (exit_time - entry_time).total_seconds() / 3600
-            
-            open_positions.discard(symbol)
-            total_concurrent = max(0, total_concurrent - 1)
             
             fee_pct = FEE_PERCENT * 2
             pnl_after_fee = pnl_pct - fee_pct
@@ -207,6 +169,12 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             day_date = str(entry_time)[:10]
             entry_time_str = str(entry_time)[11:16]
             exit_time_str = str(exit_time)[11:16]
+            
+            logger.info(f"*** TRADE GENERATED: {symbol} {day_date} {entry_time_str}")
+            logger.info(f"    Score: {score}, Reason: {reason}")
+            logger.info(f"    Entry: {entry_price:.2f}, Exit: {exit_price:.2f}, TP: {tp_price:.2f}, SL: {sl_price:.2f}")
+            logger.info(f"    Result: {result}, PnL: {pnl_usd_after_fee:.2f}%, Hold: {hold_hours:.1f}h")
+            
             results.append({
                 "date": day_date,
                 "entry_time": entry_time_str,
@@ -229,14 +197,10 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 "mae_pct": round(mae_pct, 2)
             })
         
-        logger.info(f"Scan complete: scanned {total_scanned} candles, found {signals_found} signals, generated {len(results)} trades")
-        
-        for r in results:
-            logger.info(f"TRADE: {r}")
-        
+        logger.info(f"=== SCAN COMPLETE: {total_scanned} candles, {signals_found} passed, {len(results)} trades ===")
         return results
     except Exception as e:
-        logger.error(f"Error in daily scan: {e}")
+        logger.error(f"Error in scan: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return []
