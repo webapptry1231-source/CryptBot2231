@@ -39,7 +39,7 @@ def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int =
         '1h': 3600000, '4h': 14400000, '1d': 86400000
     }.get(timeframe, 900000)
     
-    while True:
+    while current_start < end_ms:
         batch_num += 1
         try:
             batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=current_start, limit=1000)
@@ -49,17 +49,16 @@ def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int =
             
             all_candles.extend(batch)
             
-            earliest_ts = batch[0][0]
-            current_start = earliest_ts - timeframe_ms
+            last_ts = batch[-1][0]
+            logger.info(f"  Batch {batch_num}: {len(batch)} candles (latest: {pd.Timestamp(last_ts, unit='ms', tz='UTC')})")
             
-            logger.info(f"  Batch {batch_num}: {len(batch)} candles (earliest: {pd.Timestamp(earliest_ts, unit='ms', tz='UTC')})")
-            
-            if earliest_ts <= start_ms:
+            if last_ts >= end_ms:
                 break
             
             if len(batch) < 1000:
                 break
             
+            current_start = last_ts + timeframe_ms
             time.sleep(0.3)
             
         except Exception as e:

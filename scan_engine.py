@@ -97,8 +97,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if position_open:
                 continue
             
-            if not trend_bullish:
-                continue
+            trend_bonus = 10 if trend_bullish else 0
             
             window = df.iloc[:i]
             if len(window) < 50:
@@ -107,7 +106,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             entry_time = window.index[-1]
             entry_hour = entry_time.hour
             
-            score, reason = calculate_score(window)
+            score, reason = calculate_score(window, trend_bonus=trend_bonus)
             
             if total_scanned < 50:
                 logger.info(f"Candle {i} [{entry_time}]: score={score}, reason='{reason}'")
@@ -131,6 +130,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                     continue
             
             signals_found += 1
+            position_open = True
             last_signal_time[symbol] = entry_time
             
             entry_price = window.iloc[-1]['close']
@@ -178,7 +178,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                     trailing_sl = max(trailing_sl, new_trail)
                 
                 if partial_tp_hit and candle['high'] >= tp_price:
-                    pnl_pct = TP_PERCENT
+                    pnl_pct = TP_PERCENT * LEVERAGE
                     result = "TP HIT"
                     exit_price = tp_price
                     exit_time = future.index[j]
@@ -190,7 +190,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                         pnl_pct = ((trailing_sl - entry_price) / entry_price) * 100 * LEVERAGE
                         result = "TRAIL STOP"
                     else:
-                        pnl_pct = -SL_PERCENT
+                        pnl_pct = -SL_PERCENT * LEVERAGE
                         result = "SL HIT"
                     exit_price = sl_price
                     exit_time = future.index[j]
