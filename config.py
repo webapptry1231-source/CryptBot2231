@@ -37,6 +37,11 @@ SESSION_AFTERNOON_END   = 22  # 22:00 UTC  (exclusive → last candle at 21:45)
 # Keeps quality high; prevents scraping the barrel on quiet days.
 SESSION_MIN_SCORE = 73
 
+# ── Exit strategy ────────────────────────────────────────────────────────────
+PARTIAL_TP_PERCENT = 1.0    # When profit hits 1%, close 50%
+PARTIAL_TP_SIZE = 0.5       # Close 50% of position
+TIMEOUT_HOURS = 3.0         # Max hold time in hours (3.0h = 12 candles)
+
 # ── Long settings ────────────────────────────────────────────────────────────
 TP_LONG_PERCENT    = 2.0
 SL_LONG_PERCENT    = 1.0

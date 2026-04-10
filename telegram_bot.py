@@ -24,7 +24,7 @@ from config import (
 )
 
 # Conversation states
-SELECT_MODE, SELECT_DATE_DAYS, SELECT_COINS = range(3)
+SELECT_MODE, SELECT_DATE_DAYS, SELECT_DAYS_CUSTOM, SELECT_DATE_CUSTOM, SELECT_COINS = range(5)
 
 # User session data storage
 user_config = {
@@ -385,12 +385,23 @@ async def cmd_config_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_config["mode"] = "HISTORICAL"
         keyboard = [
             [KeyboardButton("7 Days"), KeyboardButton("14 Days"), KeyboardButton("30 Days")],
-            [KeyboardButton("60 Days"), KeyboardButton("90 Days")]
+            [KeyboardButton("60 Days"), KeyboardButton("90 Days"), KeyboardButton("180 Days")],
+            [KeyboardButton("1 Year (365)"), KeyboardButton("2 Years (730)"), KeyboardButton("Custom ✏️")],
+            [KeyboardButton("📅 Q1 2026 (90d)"), KeyboardButton("📅 Q4 2025 (90d)")],
+            [KeyboardButton("📅 Q3 2025 (90d)"), KeyboardButton("📅 Q2 2025 (90d)")],
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
         await update.message.reply_text(
             "✅ *HISTORICAL Mode Selected*\n\n"
-            "Select number of days to scan:",
+            "Select number of days to scan:\n"
+            "• Short: 7, 14, 30 days\n"
+            "• Medium: 60, 90, 180 days\n"
+            "• Long: 1 Year, 2 Years\n"
+            "• Test Data (from days.txt):\n"
+            "  Q1 2026: Apr 11 - Jan 11\n"
+            "  Q4 2025: Jan 11 - Oct 13\n"
+            "  Q3 2025: Oct 13 - Jul 15\n"
+            "  Q2 2025: Jul 15 - Apr 16",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -408,6 +419,7 @@ async def cmd_config_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 row = []
         if row:
             keyboard.append(row)
+        keyboard.append([KeyboardButton("📅 Custom Date")])
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
         await update.message.reply_text(
             "✅ *SURGICAL Mode Selected*\n\n"
@@ -427,17 +439,56 @@ async def cmd_config_date_days(update: Update, context: ContextTypes.DEFAULT_TYP
     mode = user_config.get("mode")
     
     if mode == "HISTORICAL":
-        if text.endswith("Days"):
-            days = int(text.split()[0])
+        # Test data presets (from days.txt)
+        if "Q1 2026" in text:
+            user_config["days"] = 90   # Apr 11 - Jan 11
+            user_config["test_period"] = "Q1 2026"
+            await show_coin_selection(update)
+            return SELECT_COINS
+        elif "Q4 2025" in text:
+            user_config["days"] = 90   # Jan 11 - Oct 13
+            user_config["test_period"] = "Q4 2025"
+            await show_coin_selection(update)
+            return SELECT_COINS
+        elif "Q3 2025" in text:
+            user_config["days"] = 90   # Oct 13 - Jul 15
+            user_config["test_period"] = "Q3 2025"
+            await show_coin_selection(update)
+            return SELECT_COINS
+        elif "Q2 2025" in text:
+            user_config["days"] = 90   # Jul 15 - Apr 16
+            user_config["test_period"] = "Q2 2025"
+            await show_coin_selection(update)
+            return SELECT_COINS
+        
+        if text.endswith("Days") or text == "180 Days":
+            if text == "180 Days":
+                days = 180
+            else:
+                days = int(text.split()[0])
             user_config["days"] = days
             await show_coin_selection(update)
             return SELECT_COINS
+        elif "1 Year" in text:
+            user_config["days"] = 365
+            await show_coin_selection(update)
+            return SELECT_COINS
+        elif "2 Years" in text:
+            user_config["days"] = 730
+            await show_coin_selection(update)
+            return SELECT_COINS
+        elif "Custom" in text:
+            await update.message.reply_text("Enter number of days (e.g., 45, 120, 180):", reply_markup=None)
+            return SELECT_DAYS_CUSTOM
         else:
             await update.message.reply_text("Select from the options")
             return SELECT_DATE_DAYS
     
     if mode == "SURGICAL":
-        if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        if text == "📅 Custom Date":
+            await update.message.reply_text("Enter date (YYYY-MM-DD, e.g., 2026-04-01):", reply_markup=None)
+            return SELECT_DATE_CUSTOM
+        elif len(text) == 10 and text[4] == "-" and text[7] == "-":
             try:
                 datetime.strptime(text, "%Y-%m-%d")
                 user_config["scan_date"] = text
@@ -464,18 +515,8 @@ async def cmd_config_date_custom(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("❌ Cannot scan future dates.")
             return SELECT_DATE_CUSTOM
         user_config["scan_date"] = date
-        
-        keyboard = [
-            [KeyboardButton("✅ Confirm"), KeyboardButton("🔄 Change")]
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        await update.message.reply_text(
-            f"✅ *Date Selected: {date}*\n\n"
-            "Continue to coin selection?",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-        return SELECT_DATE_DAYS
+        await show_coin_selection(update)
+        return SELECT_COINS
     except ValueError:
         await update.message.reply_text(
             "❌ Invalid format. Use YYYY-MM-DD (e.g., 2026-04-01)"
@@ -488,22 +529,12 @@ async def cmd_config_days_custom(update: Update, context: ContextTypes.DEFAULT_T
     text = update.message.text.strip()
     try:
         days = int(text)
-        if days < 1 or days > 365:
-            await update.message.reply_text("❌ Days must be between 1 and 365")
+        if days < 1 or days > 730:
+            await update.message.reply_text("❌ Days must be between 1 and 730")
             return SELECT_DAYS_CUSTOM
         user_config["days"] = days
-        
-        keyboard = [
-            [KeyboardButton("✅ Confirm"), KeyboardButton("🔄 Change")]
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-        await update.message.reply_text(
-            f"✅ *Days Selected: {days} days*\n\n"
-            "Continue to coin selection?",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-        return SELECT_DATE_DAYS
+        await show_coin_selection(update)
+        return SELECT_COINS
     except ValueError:
         await update.message.reply_text("❌ Enter a valid number (1-365)")
         return SELECT_DAYS_CUSTOM
@@ -693,6 +724,8 @@ def main():
         states={
             SELECT_MODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_mode)],
             SELECT_DATE_DAYS: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_date_days)],
+            SELECT_DAYS_CUSTOM: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_days_custom)],
+            SELECT_DATE_CUSTOM: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_date_custom)],
             SELECT_COINS: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_coins)],
         },
         fallbacks=[CommandHandler("cancel", cmd_config_start)],
