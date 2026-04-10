@@ -3,10 +3,13 @@ import csv
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import (
+    Application, CommandHandler, ContextTypes,
+    ConversationHandler, MessageHandler, filters
+)
 
 from config import (
     TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
@@ -19,6 +22,17 @@ from config import (
     MAX_HOLD_CANDLES_LONG, MAX_HOLD_CANDLES_SHORT,
     TRADE_HOURS_START, TRADE_HOURS_END,
 )
+
+# Conversation states
+SELECT_MODE, SELECT_DATE, SELECT_DAYS, SELECT_COINS = range(4)
+
+# User session data storage
+user_config = {
+    "mode": None,
+    "scan_date": None,
+    "days": None,
+    "coins": None,
+}
 
 from data_fetcher import fetch_ohlcv
 from scan_engine import scan_daily_historical, check_4h_trend, determine_regime, _4h_cache
@@ -128,32 +142,36 @@ def calculate_summary(results: list) -> dict:
 # Historical / Surgical scan runner
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def run_historical_scan(send_func):
+async def run_historical_scan(send_func, scan_date=None, days=None, coins=None):
     # Clear 4h cache once before scanning all symbols
     _4h_cache.clear()
+    
+    scan_date = scan_date or SCAN_DATE
+    days = days or HISTORICAL_DAYS
+    coins = coins or COINS
 
     all_results: list = []
 
-    if SCAN_DATE:
-        logger.info(f"SURGICAL scan: {SCAN_DATE}")
+    if scan_date:
+        logger.info(f"SURGICAL scan: {scan_date}")
         await send_func(
             f"📊 Starting Surgical Scan\n"
-            f"📅 Date: {SCAN_DATE}\n"
+            f"📅 Date: {scan_date}\n"
             f"🔄 {LEVERAGE}x | ${BUY_AMOUNT}/trade\n"
-            f"🪙 Coins: {', '.join(COINS)}"
+            f"🪙 Coins: {', '.join(coins)}"
         )
-        for symbol in COINS:
-            results = scan_daily_historical(symbol, target_date=SCAN_DATE)
+        for symbol in coins:
+            results = scan_daily_historical(symbol, target_date=scan_date)
             all_results.extend(results)
     else:
-        logger.info(f"HISTORICAL scan: {HISTORICAL_DAYS} days")
+        logger.info(f"HISTORICAL scan: {days} days")
         await send_func(
             f"📊 Starting Historical Scan\n"
-            f"🔄 {HISTORICAL_DAYS} days | {LEVERAGE}x | ${BUY_AMOUNT}/trade\n"
-            f"🪙 Coins: {', '.join(COINS)}"
+            f"🔄 {days} days | {LEVERAGE}x | ${BUY_AMOUNT}/trade\n"
+            f"🪙 Coins: {', '.join(coins)}"
         )
-        for symbol in COINS:
-            results = scan_daily_historical(symbol, days=HISTORICAL_DAYS)
+        for symbol in coins:
+            results = scan_daily_historical(symbol, days=days)
             all_results.extend(results)
 
     if not all_results:
@@ -165,7 +183,7 @@ async def run_historical_scan(send_func):
     summary = calculate_summary(all_results)
 
     # ── Summary message ───────────────────────────────────────────────────────
-    header = f"📊 {'SURGICAL REPORT: ' + SCAN_DATE if SCAN_DATE else f'BACKTEST ({HISTORICAL_DAYS}d)'}\n"
+    header = f"📊 {'SURGICAL REPORT: ' + scan_date if scan_date else f'BACKTEST ({days}d)'}\n"
     header += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     header += f"💰 ${BUY_AMOUNT} × {LEVERAGE}x = ${BUY_AMOUNT * LEVERAGE:.0f} notional\n"
     header += f"📈 Total Trades : {summary['total']}\n"
@@ -299,7 +317,162 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Max Hold : Long {MAX_HOLD_CANDLES_LONG * 15 // 60}h | Short {MAX_HOLD_CANDLES_SHORT * 15 // 60}h\n"
         f"Coins    : {', '.join(COINS)}\n"
         f"SCAN_DATE: {SCAN_DATE or '(live)'}"
+        f"\n\n🔧 Use /config to configure scan mode, date, days, and coins interactively."
     )
+
+
+async def cmd_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start interactive configuration conversation"""
+    keyboard = [
+        [KeyboardButton("🔴 LIVE"), KeyboardButton("🟡 HISTORICAL"), KeyboardButton("🔵 SURGICAL")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+    await update.message.reply_text(
+        "⚙️ *Configure Scan*\n\nSelect scan mode:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return SELECT_MODE
+
+
+async def cmd_config_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle mode selection"""
+    text = update.message.text
+    if "LIVE" in text:
+        user_config["mode"] = "LIVE"
+        await update.message.reply_text(
+            "✅ Mode set to LIVE\n\nEnter number of days to scan (e.g., 7, 30, 90):",
+            reply_markup=None
+        )
+        return SELECT_DAYS
+    elif "HISTORICAL" in text:
+        user_config["mode"] = "HISTORICAL"
+        await update.message.reply_text(
+            "✅ Mode set to HISTORICAL\n\nEnter number of days to scan (e.g., 7, 30, 90):",
+            reply_markup=None
+        )
+        return SELECT_DAYS
+    elif "SURGICAL" in text:
+        user_config["mode"] = "SURGICAL"
+        await update.message.reply_text(
+            "✅ Mode set to SURGICAL\n\nEnter date to scan (YYYY-MM-DD format, e.g., 2026-04-01):",
+            reply_markup=None
+        )
+        return SELECT_DATE
+    else:
+        await update.message.reply_text("Invalid selection. Try /config again.")
+        return ConversationHandler.END
+
+
+async def cmd_config_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle surgical date input"""
+    text = update.message.text.strip()
+    try:
+        from datetime import datetime
+        datetime.strptime(text, "%Y-%m-%d")
+        user_config["scan_date"] = text
+        await update.message.reply_text(
+            f"✅ Date set to {text}\n\nNow select coins to scan:\n"
+            f"Current: {', '.join(COINS)}\n"
+            f"Enter coin symbols separated by comma (e.g., BTC/USDT, ETH/USDT, SOL/USDT)\n"
+            f"Or press Skip to use default.",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("Skip")]], one_time_keyboard=True)
+        )
+        return SELECT_COINS
+    except ValueError:
+        await update.message.reply_text("❌ Invalid date format. Use YYYY-MM-DD (e.g., 2026-04-01)")
+        return ConversationHandler.END
+
+
+async def cmd_config_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle historical days input"""
+    text = update.message.text.strip()
+    try:
+        days = int(text)
+        if days < 1 or days > 365:
+            await update.message.reply_text("❌ Days must be between 1 and 365")
+            return SELECT_DAYS
+        user_config["days"] = days
+        await update.message.reply_text(
+            f"✅ Days set to {days}\n\nNow select coins to scan:\n"
+            f"Current: {', '.join(COINS)}\n"
+            f"Enter coin symbols separated by comma (e.g., BTC/USDT, ETH/USDT, SOL/USDT)\n"
+            f"Or press Skip to use default.",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("Skip")]], one_time_keyboard=True)
+        )
+        return SELECT_COINS
+    except ValueError:
+        await update.message.reply_text("❌ Invalid number. Enter a whole number like 30 or 90.")
+        return SELECT_DAYS
+
+
+async def cmd_config_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle coins selection"""
+    text = update.message.text.strip()
+    if text == "Skip":
+        user_config["coins"] = COINS
+    else:
+        coins = [c.strip().upper() for c in text.split(",") if c.strip()]
+        user_config["coins"] = coins if coins else COINS
+    
+    mode = user_config["mode"]
+    await update.message.reply_text(
+        f"✅ Configuration Complete!\n\n"
+        f"Mode  : {mode}\n"
+        f"Date  : {user_config.get('scan_date', 'N/A')}\n"
+        f"Days  : {user_config.get('days', 'N/A')}\n"
+        f"Coins : {', '.join(user_config['coins'])}\n\n"
+        f"Use /run to start the scan with these settings."
+    )
+    return ConversationHandler.END
+
+
+async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Run scan with user-configured or default settings"""
+    mode = user_config.get("mode") or os.getenv("MODE", "SURGICAL")
+    scan_date = user_config.get("scan_date") or SCAN_DATE
+    days = user_config.get("days") or HISTORICAL_DAYS
+    coins = user_config.get("coins") or COINS
+    
+    async def reply(msg: str):
+        await update.message.reply_text(msg)
+    
+    # Clear cache
+    _4h_cache.clear()
+    
+    if mode == "SURGICAL" and scan_date:
+        await run_historical_scan(reply, scan_date=scan_date, days=None, coins=coins)
+    elif mode == "HISTORICAL":
+        await run_historical_scan(reply, scan_date=None, days=days, coins=coins)
+    else:  # LIVE
+        await reply("🔴 Starting LIVE scan...")
+        await run_live_scan_with_custom_coins(reply, coins)
+
+
+async def run_live_scan_with_custom_coins(send_func, coins: list):
+    """Run live scan with custom coin list"""
+    messages = []
+    
+    with ThreadPoolExecutor(max_workers=len(coins)) as pool:
+        futures = {pool.submit(scan_coin_live, s): s for s in coins}
+        raw_results = [f.result() for f in futures]
+    
+    for r in raw_results:
+        if r["error"]:
+            continue
+        if r["score"] < WEAK_SIGNAL_THRESHOLD:
+            continue
+        if not _position_semaphore.acquire(blocking=False):
+            continue
+        
+        msg = format_signal_message(r["symbol"], r["score"], r["reason"], r["price"], r["direction"])
+        if msg:
+            await send_func(msg)
+            messages.append(msg)
+            await asyncio.sleep(0.3)
+    
+    if not messages:
+        await send_func("📭 No live signals above threshold.")
 
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -318,10 +491,12 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "/start  — bot status\n"
-        "/scan   — run scan now\n"
-        "/daily  — today's P&L summary\n"
-        "/help   — this message"
+        "/start   — bot status\n"
+        "/scan    — run scan with env config\n"
+        "/config  — interactive config (mode, date, coins)\n"
+        "/run     — run scan with configured settings\n"
+        "/daily   — today's P&L summary\n"
+        "/help    — this message"
     )
 
 
@@ -366,11 +541,26 @@ async def scheduled_scan(context: ContextTypes.DEFAULT_TYPE):
 def main():
     init_db()
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-
+    
+    # Conversation handler for /config
+    config_conv = ConversationHandler(
+        entry_points=[CommandHandler("config", cmd_config_start)],
+        states={
+            SELECT_MODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_mode)],
+            SELECT_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_date)],
+            SELECT_DAYS: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_days)],
+            SELECT_COINS: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_coins)],
+        },
+        fallbacks=[],
+    )
+    
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("scan",  cmd_scan))
     app.add_handler(CommandHandler("help",  cmd_help))
     app.add_handler(CommandHandler("daily", cmd_daily))
+    app.add_handler(CommandHandler("config", cmd_config_start))
+    app.add_handler(CommandHandler("run", cmd_run))
+    app.add_handler(config_conv)
 
     mode = os.getenv("MODE", "SURGICAL")
     if mode == "LIVE" and not SCAN_DATE:
