@@ -5,7 +5,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-BTC_ONLY = os.getenv("BTC_ONLY", "true").lower() == "true"
+BTC_ONLY = os.getenv("BTC_ONLY", "false").lower() == "true"
 
 COINS = ["BTC/USDT"] if BTC_ONLY else [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
@@ -18,7 +18,7 @@ CANDLES_NEEDED = 300
 SCAN_INTERVAL_SECONDS = 900
 
 STRONG_SIGNAL_THRESHOLD = 80
-WEAK_SIGNAL_THRESHOLD = 58
+WEAK_SIGNAL_THRESHOLD = 55
 
 # Long settings
 TP_LONG_PERCENT = 1.8
