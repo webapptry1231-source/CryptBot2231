@@ -162,37 +162,44 @@ def calculate_summary(results: list) -> dict:
 # Historical / Surgical scan runner
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def run_historical_scan(send_func, scan_date=None, days=None, coins=None):
+async def run_historical_scan(send_func, scan_date=None, days=None, coins=None, force_historical=False):
     # Clear 4h cache once before scanning all symbols
     _4h_cache.clear()
     
-    # Use provided values, fallback to env only if provided
-    scan_date = scan_date if scan_date else (SCAN_DATE if SCAN_DATE else None)
-    days = days if days else (HISTORICAL_DAYS if HISTORICAL_DAYS else 90)
-    coins = coins or COINS
+    # Determine actual values:
+    # - If scan_date/days passed explicitly (not None), use them
+    # - If force_historical=True, ignore SCAN_DATE from env
+    # - Otherwise, use env defaults
+    if force_historical:
+        actual_scan_date = None  # Force historical mode
+    else:
+        actual_scan_date = scan_date if scan_date is not None else SCAN_DATE
+    
+    actual_days = days if days is not None else HISTORICAL_DAYS
+    actual_coins = coins or COINS
 
     all_results: list = []
 
-    if scan_date:
-        logger.info(f"SURGICAL scan: {scan_date}")
+    if actual_scan_date:
+        logger.info(f"SURGICAL scan: {actual_scan_date}")
         await send_func(
             f"📊 Starting Surgical Scan\n"
-            f"📅 Date: {scan_date}\n"
+            f"📅 Date: {actual_scan_date}\n"
             f"🔄 {LEVERAGE}x | ${BUY_AMOUNT}/trade\n"
-            f"🪙 Coins: {', '.join(coins)}"
+            f"🪙 Coins: {', '.join(actual_coins)}"
         )
-        for symbol in coins:
-            results = scan_daily_historical(symbol, target_date=scan_date)
+        for symbol in actual_coins:
+            results = scan_daily_historical(symbol, target_date=actual_scan_date)
             all_results.extend(results)
     else:
-        logger.info(f"HISTORICAL scan: {days} days")
+        logger.info(f"HISTORICAL scan: {actual_days} days")
         await send_func(
             f"📊 Starting Historical Scan\n"
-            f"🔄 {days} days | {LEVERAGE}x | ${BUY_AMOUNT}/trade\n"
-            f"🪙 Coins: {', '.join(coins)}"
+            f"🔄 {actual_days} days | {LEVERAGE}x | ${BUY_AMOUNT}/trade\n"
+            f"🪙 Coins: {', '.join(actual_coins)}"
         )
-        for symbol in coins:
-            results = scan_daily_historical(symbol, days=days)
+        for symbol in actual_coins:
+            results = scan_daily_historical(symbol, days=actual_days)
             all_results.extend(results)
 
     if not all_results:
@@ -204,7 +211,7 @@ async def run_historical_scan(send_func, scan_date=None, days=None, coins=None):
     summary = calculate_summary(all_results)
 
     # ── Summary message ───────────────────────────────────────────────────────
-    header = f"📊 {'SURGICAL REPORT: ' + scan_date if scan_date else f'BACKTEST ({days}d)'}\n"
+    header = f"📊 {'SURGICAL REPORT: ' + actual_scan_date if actual_scan_date else f'BACKTEST ({actual_days}d)'}\n"
     header += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     header += f"💰 ${BUY_AMOUNT} × {LEVERAGE}x = ${BUY_AMOUNT * LEVERAGE:.0f} notional\n"
     header += f"📈 Total Trades : {summary['total']}\n"
@@ -565,8 +572,8 @@ async def show_confirmation(update: Update):
 async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Run scan with user-configured or default settings"""
     mode = user_config.get("mode") or os.getenv("MODE", "SURGICAL")
-    scan_date = user_config.get("scan_date")  # Don't fallback to SCAN_DATE - use None if not set
-    days = user_config.get("days")  # Don't fallback to HISTORICAL_DAYS - use None if not set
+    user_scan_date = user_config.get("scan_date")
+    user_days = user_config.get("days")
     coins = user_config.get("coins") or COINS
     
     async def reply(msg: str):
@@ -576,10 +583,18 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _4h_cache.clear()
     
     if mode == "HISTORICAL":
-        await run_historical_scan(reply, scan_date=None, days=days, coins=coins)
-    elif mode == "SURGICAL" and scan_date:
-        await run_historical_scan(reply, scan_date=scan_date, days=None, coins=coins)
-    else:  # LIVE or default
+        # For historical: use user_days if set, else env default
+        # Pass force_historical=True so function ignores env SCAN_DATE
+        days_to_use = user_days if user_days else HISTORICAL_DAYS
+        await run_historical_scan(reply, days=days_to_use, coins=coins, force_historical=True)
+    elif mode == "SURGICAL":
+        # For surgical: use user_scan_date if set, else env default
+        date_to_use = user_scan_date if user_scan_date else SCAN_DATE
+        if date_to_use:
+            await run_historical_scan(reply, scan_date=date_to_use, coins=coins, force_historical=False)
+        else:
+            await reply("❌ No date configured. Set SCAN_DATE in env or use /config.")
+    else:  # LIVE
         await reply("🔴 Starting LIVE scan...")
         await run_live_scan_with_custom_coins(reply, coins)
 
