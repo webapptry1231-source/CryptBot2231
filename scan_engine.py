@@ -37,6 +37,7 @@ import pandas as pd
 from data_fetcher import fetch_historical_ohlcv, fetch_surgical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
+from data_fetcher import fetch_historical_ohlcv, fetch_surgical_ohlcv, fetch_date_range_ohlcv
 from config import (
     TIMEFRAME, TIMEFRAME_4H, WEAK_SIGNAL_THRESHOLD, STRONG_SIGNAL_THRESHOLD,
     TP_LONG_PERCENT, SL_LONG_PERCENT, TRAIL_ACTIVATE_LONG,
@@ -479,7 +480,7 @@ def _simulate_trade(
 # Main entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) -> list:
+def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90, end_date: str = None) -> list:
     """
     Run the best-signal-per-session scan for `symbol`.
 
@@ -493,7 +494,12 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
     """
     try:
         # ── Fetch data ──────────────────────────────────────────────────────
-        if SCAN_DATE or target_date:
+        if end_date:
+            # Date range mode (for test data periods like Q1 2026)
+            logger.info(f"=== DATE RANGE SCAN | {symbol} | {days} days ending {end_date} ===")
+            df = fetch_date_range_ohlcv(symbol, timeframe=TIMEFRAME, end_date=end_date, days=days)
+            scan_dates = sorted(set(df.index.strftime("%Y-%m-%d").tolist()))
+        elif SCAN_DATE or target_date:
             scan_date = SCAN_DATE or target_date
             logger.info(f"=== SURGICAL SCAN | {symbol} | {scan_date} ===")
             df = fetch_surgical_ohlcv(symbol, timeframe=TIMEFRAME, target_date=scan_date)
@@ -501,7 +507,6 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
         else:
             logger.info(f"=== HISTORICAL SCAN | {symbol} | {days} days ===")
             df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
-            # Collect all unique dates in the fetched window
             scan_dates = sorted(set(df.index.strftime("%Y-%m-%d").tolist()))
 
         if df is None or len(df) < 100:

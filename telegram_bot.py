@@ -162,7 +162,7 @@ def calculate_summary(results: list) -> dict:
 # Historical / Surgical scan runner
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def run_historical_scan(send_func, scan_date=None, days=None, coins=None, force_historical=False):
+async def run_historical_scan(send_func, scan_date=None, days=None, coins=None, force_historical=False, end_date=None):
     # Clear 4h cache once before scanning all symbols
     _4h_cache.clear()
     
@@ -180,7 +180,19 @@ async def run_historical_scan(send_func, scan_date=None, days=None, coins=None, 
 
     all_results: list = []
 
-    if actual_scan_date:
+    if end_date:
+        # Date range mode (for test data periods like Q1 2026)
+        logger.info(f"DATE RANGE scan: {actual_days} days ending {end_date}")
+        await send_func(
+            f"📊 Starting Date Range Scan\n"
+            f"📅 Period: {actual_days} days ending {end_date}\n"
+            f"🔄 {LEVERAGE}x | ${BUY_AMOUNT}/trade\n"
+            f"🪙 Coins: {', '.join(actual_coins)}"
+        )
+        for symbol in actual_coins:
+            results = scan_daily_historical(symbol, days=actual_days, end_date=end_date)
+            all_results.extend(results)
+    elif actual_scan_date:
         logger.info(f"SURGICAL scan: {actual_scan_date}")
         await send_func(
             f"📊 Starting Surgical Scan\n"
@@ -439,25 +451,25 @@ async def cmd_config_date_days(update: Update, context: ContextTypes.DEFAULT_TYP
     mode = user_config.get("mode")
     
     if mode == "HISTORICAL":
-        # Test data presets (from days.txt)
+        # Test data presets (from days.txt) - use scan_date to set end date
         if "Q1 2026" in text:
-            user_config["days"] = 90   # Apr 11 - Jan 11
-            user_config["test_period"] = "Q1 2026"
+            user_config["days"] = 90
+            user_config["scan_date"] = "2026-04-11"  # End of Q1 2026
             await show_coin_selection(update)
             return SELECT_COINS
         elif "Q4 2025" in text:
-            user_config["days"] = 90   # Jan 11 - Oct 13
-            user_config["test_period"] = "Q4 2025"
+            user_config["days"] = 90
+            user_config["scan_date"] = "2026-01-11"  # End of Q4 2025
             await show_coin_selection(update)
             return SELECT_COINS
         elif "Q3 2025" in text:
-            user_config["days"] = 90   # Oct 13 - Jul 15
-            user_config["test_period"] = "Q3 2025"
+            user_config["days"] = 90
+            user_config["scan_date"] = "2025-10-13"  # End of Q3 2025
             await show_coin_selection(update)
             return SELECT_COINS
         elif "Q2 2025" in text:
-            user_config["days"] = 90   # Jul 15 - Apr 16
-            user_config["test_period"] = "Q2 2025"
+            user_config["days"] = 90
+            user_config["scan_date"] = "2025-07-15"  # End of Q2 2025
             await show_coin_selection(update)
             return SELECT_COINS
         
@@ -609,10 +621,20 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _4h_cache.clear()
     
     if mode == "HISTORICAL":
-        # For historical: use user_days if set, else env default
-        # Pass force_historical=True so function ignores env SCAN_DATE
-        days_to_use = user_days if user_days else HISTORICAL_DAYS
-        await run_historical_scan(reply, days=days_to_use, coins=coins, force_historical=True)
+        # Check if test period was selected (has end_date set)
+        user_scan_date = user_config.get("scan_date")  # This is used as end_date for test periods
+        
+        if user_scan_date and user_days:
+            # Test data preset selected - use date range scan
+            await run_historical_scan(reply, days=user_days, end_date=user_scan_date, coins=coins, force_historical=True)
+        elif user_scan_date:
+            # Regular historical scan
+            days_to_use = user_days if user_days else HISTORICAL_DAYS
+            await run_historical_scan(reply, days=days_to_use, coins=coins, force_historical=True)
+        else:
+            # Regular historical scan
+            days_to_use = user_days if user_days else HISTORICAL_DAYS
+            await run_historical_scan(reply, days=days_to_use, coins=coins, force_historical=True)
     elif mode == "SURGICAL":
         # For surgical: use user_scan_date if set, else env default
         date_to_use = user_scan_date if user_scan_date else SCAN_DATE
