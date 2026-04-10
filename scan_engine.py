@@ -175,7 +175,6 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 dbg_neutral_filtered += 1
                 total_scanned += 1
                 continue
-                continue
 
             # ── FILTER: preferred window 16-20 UTC (log preference) ───────────────
             # (For informational purposes only - not blocking)
