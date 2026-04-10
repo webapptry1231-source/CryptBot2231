@@ -166,8 +166,9 @@ async def run_historical_scan(send_func, scan_date=None, days=None, coins=None):
     # Clear 4h cache once before scanning all symbols
     _4h_cache.clear()
     
-    scan_date = scan_date or SCAN_DATE
-    days = days or HISTORICAL_DAYS
+    # Use provided values, fallback to env only if provided
+    scan_date = scan_date if scan_date else (SCAN_DATE if SCAN_DATE else None)
+    days = days if days else (HISTORICAL_DAYS if HISTORICAL_DAYS else 90)
     coins = coins or COINS
 
     all_results: list = []
@@ -564,8 +565,8 @@ async def show_confirmation(update: Update):
 async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Run scan with user-configured or default settings"""
     mode = user_config.get("mode") or os.getenv("MODE", "SURGICAL")
-    scan_date = user_config.get("scan_date") or SCAN_DATE
-    days = user_config.get("days") or HISTORICAL_DAYS
+    scan_date = user_config.get("scan_date")  # Don't fallback to SCAN_DATE - use None if not set
+    days = user_config.get("days")  # Don't fallback to HISTORICAL_DAYS - use None if not set
     coins = user_config.get("coins") or COINS
     
     async def reply(msg: str):
@@ -574,11 +575,11 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Clear cache
     _4h_cache.clear()
     
-    if mode == "SURGICAL" and scan_date:
-        await run_historical_scan(reply, scan_date=scan_date, days=None, coins=coins)
-    elif mode == "HISTORICAL":
+    if mode == "HISTORICAL":
         await run_historical_scan(reply, scan_date=None, days=days, coins=coins)
-    else:  # LIVE
+    elif mode == "SURGICAL" and scan_date:
+        await run_historical_scan(reply, scan_date=scan_date, days=None, coins=coins)
+    else:  # LIVE or default
         await reply("🔴 Starting LIVE scan...")
         await run_live_scan_with_custom_coins(reply, coins)
 
