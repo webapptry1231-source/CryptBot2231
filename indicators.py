@@ -13,6 +13,10 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         for col in macd.columns:
             df[col] = macd[col]
 
+    ema20 = df.ta.ema(length=20)
+    if ema20 is not None:
+        df['EMA_20'] = ema20 if not isinstance(ema20, pd.DataFrame) else ema20
+
     ema50 = df.ta.ema(length=50)
     if ema50 is not None:
         df['EMA_50'] = ema50 if not isinstance(ema50, pd.DataFrame) else ema50.iloc[:, -1]
@@ -23,12 +27,11 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     bbands = df.ta.bbands(length=20, std=2)
     if bbands is not None:
-        # Extract all three Bollinger Band lines: lower, mid, upper
         bb_lower_col = [c for c in bbands.columns if c.startswith('BBL')][0]
         bb_mid_col   = [c for c in bbands.columns if c.startswith('BBM')][0]
         bb_upper_col = [c for c in bbands.columns if c.startswith('BBU')][0]
         df['BBL_20_2'] = bbands[bb_lower_col]
-        df['BBM_20_2'] = bbands[bb_mid_col]     # FIX: was missing in V5/V6 → KeyError crash
+        df['BBM_20_2'] = bbands[bb_mid_col]
         df['BBU_20_2'] = bbands[bb_upper_col]
 
     adx_result = df.ta.adx(length=14)
@@ -36,6 +39,15 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['ADX_14'] = adx_result['ADX_14']
         df['DMP_14'] = adx_result['DMP_14']
         df['DMN_14'] = adx_result['DMN_14']
+
+    stochrsi = df.ta.stochrsi(length=14, rsi_length=14, k=3, d=3)
+    if stochrsi is not None:
+        df['STOCHRSI_K'] = stochrsi.iloc[:, 0]
+        df['STOCHRSI_D'] = stochrsi.iloc[:, 1]
+
+    atr = df.ta.atr(length=14)
+    if atr is not None:
+        df['ATR_14'] = atr
 
     df['VOL_SMA_20'] = df['volume'].rolling(window=20).mean()
 

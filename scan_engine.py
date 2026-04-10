@@ -121,7 +121,7 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
 
         trades_per_day  = {}
         last_signal_time = {}
-        position_open   = False
+        open_positions = {}
         total_scanned   = 0
         signals_found   = 0
 
@@ -209,7 +209,7 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
                 )
 
             # ── FILTER: existing position ─────────────────────────────────────
-            if position_open:
+            if open_positions.get(symbol, False):
                 dbg_position_skipped += 1
                 continue
 
@@ -225,7 +225,9 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
             if len(window) < 50:
                 continue
 
-            score, reason = calculate_score(window, direction=direction)
+            is_4h_aligned = check_4h_trend(symbol, current_time)
+            trend_bonus = 5 if (direction == "LONG" and is_4h_aligned) or (direction == "SHORT" and not is_4h_aligned) else 0
+            score, reason = calculate_score(window, trend_bonus=trend_bonus, direction=direction)
 
             # detailed debug on first 10 in-hours candles
             if total_scanned <= 10:
@@ -262,7 +264,7 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
             # SIGNAL ACCEPTED
             # ─────────────────────────────────────────────────────────────────
             signals_found += 1
-            position_open  = True
+            open_positions[symbol] = True
             last_signal_time[symbol] = current_time
             
             # Determine params based on direction
@@ -281,17 +283,25 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
 
             hold_candles = min(max_hold, total_candles - i - 1)
             if hold_candles < 1:
-                position_open = False
+                open_positions[symbol] = False
                 continue
 
             future = df.iloc[i:i + hold_candles]
             if len(future) == 0:
-                position_open = False
+                open_positions[symbol] = False
                 continue
 
             mfe_pct = ((future['high'].max() - entry_price) / entry_price) * 100
             mae_pct = ((entry_price - future['low'].min()) / entry_price) * 100
-
+            
+            atr_val = window.iloc[-1].get('ATR_14')
+            if atr_val and atr_val > 0:
+                sl_distance = atr_val * 1.5
+                sl_percent = (sl_distance / entry_price) * 100
+                tp_percent_new = sl_percent * 2.0
+                if tp_percent_new > 0:
+                    tp_percent = tp_percent_new
+            
             tp_price        = entry_price * (1 + tp_percent / 100) if direction == "LONG" else entry_price * (1 - tp_percent / 100)
             sl_price        = entry_price * (1 - sl_percent / 100) if direction == "LONG" else entry_price * (1 + sl_percent / 100)
             partial_tp_price = entry_price * (1 + trail_activate / 100) if direction == "LONG" else entry_price * (1 - trail_activate / 100)
@@ -374,7 +384,7 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
                     pnl_pct = ((entry_price - exit_price) / entry_price) * 100 * LEVERAGE
                 result     = "TIMEOUT"
 
-            position_open = False
+            open_positions[symbol] = False
 
             hold_hours       = (exit_time - current_time).total_seconds() / 3600
             fee_pct          = FEE_PERCENT * 2

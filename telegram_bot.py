@@ -14,6 +14,10 @@ from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
                     BUY_AMOUNT, MAX_HOLD_CANDLES)
 
 MAX_OPEN_TRADES = 3
+import threading
+_position_semaphore = threading.Semaphore(MAX_OPEN_TRADES)
+_open_positions = {}
+
 from data_fetcher import fetch_ohlcv
 from scan_engine import scan_daily_historical, check_4h_trend, determine_regime
 from signal_formatter import format_signal_message
@@ -33,11 +37,6 @@ def scan_coin(symbol: str) -> dict:
         if current_hour < TRADE_HOURS_START or current_hour >= TRADE_HOURS_END:
             return {"symbol": symbol, "score": 0, "reason": "outside_trade_hours", "price": 0, "error": None}
         
-        if symbol != "BTC/USDT":
-            btc_bullish = check_4h_trend("BTC/USDT")
-            if not btc_bullish:
-                return {"symbol": symbol, "score": 0, "reason": "btc_bearish_block", "price": 0, "error": None}
-        
         df = fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=CANDLES_NEEDED)
         df = compute_indicators(df)
         
@@ -46,7 +45,15 @@ def scan_coin(symbol: str) -> dict:
         if direction == "NEUTRAL":
             return {"symbol": symbol, "score": 0, "reason": "neutral_regime", "price": 0, "error": None}
         
-        score, reason = calculate_score(df, direction=direction)
+        btc_bonus = 0
+        if symbol != "BTC/USDT":
+            btc_4h_bullish = check_4h_trend("BTC/USDT")
+            if (direction == "LONG" and btc_4h_bullish) or (direction == "SHORT" and not btc_4h_bullish):
+                btc_bonus = 5
+        
+        score, reason = calculate_score(df, trend_bonus=btc_bonus, direction=direction)
+        
+        score, reason = calculate_score(df, trend_bonus=btc_bonus, direction=direction)
         
         if score < WEAK_SIGNAL_THRESHOLD or "low_volume" in reason:
             return {"symbol": symbol, "score": 0, "reason": reason, "price": 0, "error": None}
@@ -159,6 +166,14 @@ async def run_historical_scan(send_func):
     
     for trade in results:
         log_backtest_trade(run_timestamp, trade)
+    
+    import csv
+    csv_path = f"logs/backtest_{run_timestamp}.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=results[0].keys() if results else [])
+        writer.writeheader()
+        writer.writerows(results)
+    logger.info(f"Results saved to {csv_path}")
 
 async def run_live_scan(send_func) -> list[str]:
     messages = []
@@ -181,6 +196,10 @@ async def run_live_scan(send_func) -> list[str]:
         logger.info(f"RESULT: {symbol} - score={score}, reason={reason}, price={price}")
         
         if score >= WEAK_SIGNAL_THRESHOLD:
+            if not _position_semaphore.acquire(blocking=False):
+                logger.info(f"SIGNAL: {symbol} blocked - max concurrent reached")
+                continue
+            _open_positions[symbol] = True
             logger.info(f"SIGNAL: {symbol} qualifies with score {score}")
             direction = r.get('direction', 'LONG')
             msg = format_signal_message(symbol, score, reason, price, direction)
@@ -226,7 +245,23 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "/start — status\n"
         "/scan — scan now\n"
+        "/daily — today's P&L\n"
         "/help — this"
+    )
+
+async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from trade_logger import DB_PATH
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT result, pnl_usd_after_fee FROM backtest_trades WHERE date=?", (today,)
+    ).fetchall()
+    conn.close()
+    wins = sum(1 for r in rows if r[1] and r[1] > 0)
+    total_pnl = sum(r[1] if r[1] else 0 for r in rows)
+    await update.message.reply_text(
+        f"📊 Today ({today})\nTrades: {len(rows)} | Wins: {wins} | P&L: ${total_pnl:.2f}"
     )
 
 async def scheduled_scan(context: ContextTypes.DEFAULT_TYPE):
@@ -246,6 +281,7 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("daily", cmd_daily))
     
     if not SCAN_DATE:
         app.job_queue.run_repeating(scheduled_scan, interval=SCAN_INTERVAL_SECONDS, first=10)

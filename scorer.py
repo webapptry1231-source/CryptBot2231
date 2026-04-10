@@ -134,11 +134,12 @@ def calculate_score(df: pd.DataFrame, trend_bonus: int = 0, direction: str = "LO
     # ── ADX / Trend strength ─────────────────────────────────────────────────
     # ADX removed as positive score (causes "top buyer" signal per audit)
 
-    # ── Volume scoring ────────────────────────────────────────────────────────
+    # ── Volume scoring ───────────────────────────────────────────────────────
+    vol_threshold = 1.3 if direction == "SHORT" else 1.15
     if vol_ratio >= 1.5:
         score += 15
         reasons.append("high_volume_spike")
-    elif vol_ratio >= 1.15:
+    elif vol_ratio >= vol_threshold:
         score += 10
         reasons.append("volume_spike")
     elif vol_ratio >= 0.9:
@@ -153,8 +154,24 @@ def calculate_score(df: pd.DataFrame, trend_bonus: int = 0, direction: str = "LO
         else:
             reasons.append("4h_bearish")
 
-    # ── Score ceiling ─────────────────────────────────────────────────────────
-    score = max(0, min(80, score))  # Cap at 80 per r9.txt
+    # ── EMA20 Stack Alignment ─────────────────────────────────────────────────
+    ema20 = latest.get('EMA_20', close)
+    if ema20 and close > ema20 and ema20 > ema50:
+        score += 8
+        reasons.append("EMA20_stack_bullish" if direction == "LONG" else "EMA20_stack_bearish")
+
+    # ── Stochastic RSI ─────────────────────────────────────────────────
+    stoch_k = latest.get('STOCHRSI_K', 50)
+    stoch_d = latest.get('STOCHRSI_D', 50)
+    if direction == "LONG" and stoch_k < 20 and stoch_k > stoch_d:
+        score += 10
+        reasons.append("StochRSI_oversold_cross")
+    elif direction == "SHORT" and stoch_k > 80 and stoch_k < stoch_d:
+        score += 10
+        reasons.append("StochRSI_overbought_cross")
+
+    # ── Score floor ─────────────────────────────────────────────────────────
+    score = max(0, score)
     
     reason_str = " + ".join(reasons) if reasons else "no_signal"
     return score, reason_str

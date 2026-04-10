@@ -2,7 +2,7 @@ import sqlite3
 import os
 from datetime import datetime
 
-DB_PATH = os.getenv("DB_PATH", "logs/trades.db")
+DB_PATH = os.getenv("DB_PATH", "/data/trades.db")
 
 def init_db():
     os.makedirs("logs", exist_ok=True)
