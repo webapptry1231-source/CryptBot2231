@@ -3,14 +3,15 @@ import pandas as pd
 from data_fetcher import fetch_historical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
-from config import (TIMEFRAME, TIMEFRAME_4H, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD,
-                    TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT,
+from config import (TIMEFRAME, TIMEFRAME_4H, WEAK_SIGNAL_THRESHOLD,
+                    TP_LONG_PERCENT, SL_LONG_PERCENT, TRAIL_ACTIVATE_LONG, 
+                    TP_SHORT_PERCENT, SL_SHORT_PERCENT, TRAIL_ACTIVATE_SHORT,
+                    MAX_HOLD_CANDLES_LONG, MAX_HOLD_CANDLES_SHORT,
+                    TRAILING_STOP_PERCENT, LEVERAGE, BUY_AMOUNT,
                     DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
-                    TRADE_HOURS_PREFERRED_START, TRADE_HOURS_PREFERRED_END,
-                    TRADE_DAYS_BLOCKED, TRADE_HOURS_BLACKOUT_START, TRADE_HOURS_BLACKOUT_END,
+                    NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED,
                     SL_OVERRIDES, MAX_CONCURRENT_TRADES,
-                    PARTIAL_TP_PERCENT, PARTIAL_TP_SIZE, TRAILING_STOP_PERCENT, FEE_PERCENT,
-                    DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP, MAX_NOTIONAL)
+                    FEE_PERCENT, DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,50 @@ def check_4h_trend(symbol: str, as_of_time: pd.Timestamp = None) -> bool:
         return True  # default to allowing trades if 4h check errors
 
 
+def determine_regime(df: pd.DataFrame, as_of_time: pd.Timestamp = None) -> str:
+    """
+    Determine market regime based on r9.txt:
+    - LONG: Price > EMA200 AND EMA50 > EMA200 OR 4h_bullish
+    - SHORT: Price < EMA200 AND EMA50 < EMA200 OR 4h_bearish
+    - NEUTRAL: Price within 0.5% of EMA200 (sleep mode)
+    """
+    if len(df) < 2:
+        return "LONG"  # Default to LONG if insufficient data
+    
+    df = compute_indicators(df)
+    latest = df.iloc[-1]
+    
+    close = float(latest['close'])
+    ema200 = float(latest['EMA_200'])
+    ema50 = float(latest['EMA_50'])
+    
+    # Check Neutral Zone (within 0.5% of EMA200)
+    pct_from_ema = abs(close - ema200) / ema200 * 100
+    if pct_from_ema <= NEUTRAL_ZONE_PCT:
+        return "NEUTRAL"
+    
+    # Check Long conditions
+    long_condition = (close > ema200 and ema50 > ema200)
+    
+    # Check Short conditions
+    short_condition = (close < ema200 and ema50 < ema200)
+    
+    # Get 4h trend
+    if as_of_time is not None:
+        trend_bullish = check_4h_trend("BTC/USDT", as_of_time)
+    else:
+        trend_bullish = True
+    
+    # Apply 4h trend override
+    if long_condition or trend_bullish:
+        return "LONG"
+    elif short_condition or not trend_bullish:
+        return "SHORT"
+    
+    # Default to NEUTRAL if unclear
+    return "NEUTRAL"
+
+
 def scan_daily_historical(symbol: str, days: int) -> list:
     global _4h_cache
     _4h_cache.clear()
@@ -85,11 +130,16 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         dbg_cooldown_skipped = 0
         dbg_loss_cap_skipped = 0
         dbg_day_filtered     = 0
-        dbg_blackout_filtered = 0
-        dbg_consecutive_sl   = 0
+        dbg_neutral_filtered = 0
+        dbg_long_skipped     = 0
+        dbg_short_skipped    = 0
 
         # Track consecutive SL hits for auto-stop
         consecutive_sl_hits = 0
+        
+        # Track current regime
+        current_regime = "LONG"
+        regime_check_time = None
 
         logger.info(
             f"Scan config: WEAK_THRESHOLD={WEAK_SIGNAL_THRESHOLD}, "
@@ -98,14 +148,15 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             f"DAILY_CAP={DAILY_TRADE_CAP}, LOSS_CAP={DAILY_LOSS_CAP}"
         )
 
-        for i in range(24, total_candles - MAX_HOLD_CANDLES):
+        for i in range(24, total_candles - MAX_HOLD_CANDLES_LONG):
             current_time = df.index[i]
 
-            # refresh 4h trend every 4 hours
-            if last_check_time is None or \
-               (current_time - last_check_time).total_seconds() / 3600 >= 4:
-                trend_bullish   = check_4h_trend(symbol, current_time)
-                last_check_time = current_time
+            # refresh regime every 4 hours
+            if regime_check_time is None or \
+               (current_time - regime_check_time).total_seconds() / 3600 >= 4:
+                current_regime = determine_regime(df, current_time)
+                regime_check_time = current_time
+                logger.info(f"Regime at {current_time}: {current_regime}")
 
             # ── FILTER: trade hours ───────────────────────────────────────────
             if current_time.hour < TRADE_HOURS_START or current_time.hour >= TRADE_HOURS_END:
@@ -119,14 +170,15 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 total_scanned += 1
                 continue
 
-            # ── FILTER: blackout window 04-08 UTC ────────────────────────────────
-            if TRADE_HOURS_BLACKOUT_START <= current_time.hour < TRADE_HOURS_BLACKOUT_END:
-                dbg_blackout_filtered += 1
+            # ── FILTER: Neutral Zone (sleep mode) ───────────────────────────────
+            if current_regime == "NEUTRAL":
+                dbg_neutral_filtered += 1
                 total_scanned += 1
+                continue
                 continue
 
             # ── FILTER: preferred window 16-20 UTC (log preference) ───────────────
-            in_preferred = TRADE_HOURS_PREFERRED_START <= current_time.hour < TRADE_HOURS_PREFERRED_END
+            # (For informational purposes only - not blocking)
 
             total_scanned += 1
 
@@ -144,20 +196,25 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 dbg_position_skipped += 1
                 continue
 
-            trend_bonus = 10 if trend_bullish else 0
+            # Determine direction based on regime
+            if current_regime == "LONG":
+                direction = "LONG"
+            elif current_regime == "SHORT":
+                direction = "SHORT"
+            else:
+                continue  # NEUTRAL - should not reach here due to filter above
 
             window = df.iloc[:i]
             if len(window) < 50:
                 continue
 
-            score, reason = calculate_score(window, trend_bonus=trend_bonus)
+            score, reason = calculate_score(window, direction=direction)
 
             # detailed debug on first 10 in-hours candles
             if total_scanned <= 10:
                 logger.info(
                     f"[DEBUG] candle {i} [{current_time}]: "
-                    f"score={score}, trend={'bull' if trend_bullish else 'bear'}, "
-                    f"reason='{reason}'"
+                    f"regime={current_regime}, score={score}, reason='{reason}'"
                 )
 
             # ── FILTER: score threshold ───────────────────────────────────────
@@ -190,10 +247,22 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             signals_found += 1
             position_open  = True
             last_signal_time[symbol] = current_time
+            
+            # Determine params based on direction
+            if direction == "LONG":
+                tp_percent = TP_LONG_PERCENT
+                sl_percent = SL_OVERRIDES.get(symbol, SL_LONG_PERCENT)
+                trail_activate = TRAIL_ACTIVATE_LONG
+                max_hold = MAX_HOLD_CANDLES_LONG
+            else:  # SHORT
+                tp_percent = TP_SHORT_PERCENT
+                sl_percent = SL_OVERRIDES.get(symbol, SL_SHORT_PERCENT)
+                trail_activate = TRAIL_ACTIVATE_SHORT
+                max_hold = MAX_HOLD_CANDLES_SHORT
 
             entry_price = window.iloc[-1]['close'] * 1.001   # +0.1% slippage
 
-            hold_candles = min(MAX_HOLD_CANDLES, total_candles - i - 1)
+            hold_candles = min(max_hold, total_candles - i - 1)
             if hold_candles < 1:
                 position_open = False
                 continue
@@ -206,14 +275,14 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             mfe_pct = ((future['high'].max() - entry_price) / entry_price) * 100
             mae_pct = ((entry_price - future['low'].min()) / entry_price) * 100
 
-            sl_percent      = SL_OVERRIDES.get(symbol, SL_PERCENT)
-            tp_price        = entry_price * (1 + TP_PERCENT / 100)
+            tp_price        = entry_price * (1 + tp_percent / 100)
             sl_price        = entry_price * (1 - sl_percent / 100)
-            partial_tp_price = entry_price * (1 + PARTIAL_TP_PERCENT / 100)
+            partial_tp_price = entry_price * (1 + trail_activate / 100)
 
             partial_tp_hit = False
             trailing_sl    = sl_price
             running_high   = entry_price
+            running_low    = entry_price
             trade_closed   = False
             exit_price     = entry_price
             exit_time      = current_time
@@ -222,41 +291,70 @@ def scan_daily_historical(symbol: str, days: int) -> list:
 
             for j in range(len(future)):
                 candle = future.iloc[j]
-                running_high = max(running_high, candle['high'])
-
-                if not partial_tp_hit and candle['high'] >= partial_tp_price:
-                    partial_tp_hit = True
-                    trailing_sl = entry_price  # move SL to breakeven
-
-                if partial_tp_hit:
-                    new_trail = running_high * (1 - TRAILING_STOP_PERCENT / 100)
-                    trailing_sl = max(trailing_sl, new_trail)
-
-                if partial_tp_hit and candle['high'] >= tp_price:
-                    pnl_pct    = TP_PERCENT * LEVERAGE
-                    result     = "TP HIT"
-                    exit_price = tp_price
-                    exit_time  = future.index[j]
-                    trade_closed = True
-                    break
-
-                if candle['low'] <= trailing_sl:
+                
+                if direction == "LONG":
+                    running_high = max(running_high, candle['high'])
+                    if not partial_tp_hit and candle['high'] >= partial_tp_price:
+                        partial_tp_hit = True
+                        trailing_sl = entry_price  # move SL to breakeven
                     if partial_tp_hit:
-                        pnl_pct = ((trailing_sl - entry_price) / entry_price) * 100 * LEVERAGE
-                        result  = "TRAIL STOP"
-                    else:
-                        pnl_pct = -sl_percent * LEVERAGE
-                        result  = "SL HIT"
-                    exit_price = trailing_sl
-                    exit_time  = future.index[j]
-                    trade_closed = True
-                    break
+                        new_trail = running_high * (1 - TRAILING_STOP_PERCENT / 100)
+                        trailing_sl = max(trailing_sl, new_trail)
+                    # LONG: TP on high, SL on low
+                    if partial_tp_hit and candle['high'] >= tp_price:
+                        pnl_pct    = tp_percent * LEVERAGE
+                        result     = "TP HIT"
+                        exit_price = tp_price
+                        exit_time  = future.index[j]
+                        trade_closed = True
+                        break
+                    if candle['low'] <= trailing_sl:
+                        if partial_tp_hit:
+                            pnl_pct = ((trailing_sl - entry_price) / entry_price) * 100 * LEVERAGE
+                            result  = "TRAIL STOP"
+                        else:
+                            pnl_pct = -sl_percent * LEVERAGE
+                            result  = "SL HIT"
+                        exit_price = trailing_sl
+                        exit_time  = future.index[j]
+                        trade_closed = True
+                        break
+                else:  # SHORT
+                    running_low = min(running_low, candle['low']) if j > 0 else candle['low']
+                    if not partial_tp_hit and candle['low'] <= partial_tp_price:
+                        partial_tp_hit = True
+                        trailing_sl = entry_price  # move SL to breakeven
+                    if partial_tp_hit:
+                        new_trail = running_low * (1 + TRAILING_STOP_PERCENT / 100)
+                        trailing_sl = min(trailing_sl, new_trail)
+                    # SHORT: TP on low, SL on high
+                    if partial_tp_hit and candle['low'] <= tp_price:
+                        pnl_pct    = tp_percent * LEVERAGE
+                        result     = "TP HIT"
+                        exit_price = tp_price
+                        exit_time  = future.index[j]
+                        trade_closed = True
+                        break
+                    if candle['high'] >= trailing_sl:
+                        if partial_tp_hit:
+                            pnl_pct = ((entry_price - trailing_sl) / entry_price) * 100 * LEVERAGE
+                            result  = "TRAIL STOP"
+                        else:
+                            pnl_pct = -sl_percent * LEVERAGE
+                            result  = "SL HIT"
+                        exit_price = trailing_sl
+                        exit_time  = future.index[j]
+                        trade_closed = True
+                        break
 
             if not trade_closed:
                 timeout_candle = df.iloc[min(i + hold_candles - 1, len(df) - 1)]
                 exit_price = timeout_candle['close']
                 exit_time  = timeout_candle.name
-                pnl_pct    = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
+                if direction == "LONG":
+                    pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
+                else:  # SHORT
+                    pnl_pct = ((entry_price - exit_price) / entry_price) * 100 * LEVERAGE
                 result     = "TIMEOUT"
 
             position_open = False
@@ -318,7 +416,7 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             f"score<{WEAK_SIGNAL_THRESHOLD}={dbg_score_rejected} "
             f"cooldown={dbg_cooldown_skipped} "
             f"loss_cap={dbg_loss_cap_skipped} "
-            f"days={dbg_day_filtered} blackout={dbg_blackout_filtered}"
+            f"days={dbg_day_filtered} neutral={dbg_neutral_filtered}"
         )
         return results
 
