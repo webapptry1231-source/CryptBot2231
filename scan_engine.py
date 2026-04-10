@@ -6,9 +6,11 @@ from scorer import calculate_score
 from config import (TIMEFRAME, TIMEFRAME_4H, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRESHOLD,
                     TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT,
                     DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
+                    TRADE_HOURS_PREFERRED_START, TRADE_HOURS_PREFERRED_END,
+                    TRADE_DAYS_BLOCKED, TRADE_HOURS_BLACKOUT_START, TRADE_HOURS_BLACKOUT_END,
                     SL_OVERRIDES, MAX_CONCURRENT_TRADES,
                     PARTIAL_TP_PERCENT, PARTIAL_TP_SIZE, TRAILING_STOP_PERCENT, FEE_PERCENT,
-                    DAILY_LOSS_CAP)
+                    DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP, MAX_NOTIONAL)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,12 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         dbg_score_rejected   = 0
         dbg_cooldown_skipped = 0
         dbg_loss_cap_skipped = 0
+        dbg_day_filtered     = 0
+        dbg_blackout_filtered = 0
+        dbg_consecutive_sl   = 0
+
+        # Track consecutive SL hits for auto-stop
+        consecutive_sl_hits = 0
 
         logger.info(
             f"Scan config: WEAK_THRESHOLD={WEAK_SIGNAL_THRESHOLD}, "
@@ -104,6 +112,21 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 dbg_hours_filtered += 1
                 total_scanned += 1
                 continue
+
+            # ── FILTER: blocked days (Mon=0, Sat=5) ─────────────────────────────
+            if current_time.weekday() in TRADE_DAYS_BLOCKED:
+                dbg_day_filtered += 1
+                total_scanned += 1
+                continue
+
+            # ── FILTER: blackout window 04-08 UTC ────────────────────────────────
+            if TRADE_HOURS_BLACKOUT_START <= current_time.hour < TRADE_HOURS_BLACKOUT_END:
+                dbg_blackout_filtered += 1
+                total_scanned += 1
+                continue
+
+            # ── FILTER: preferred window 16-20 UTC (log preference) ───────────────
+            in_preferred = TRADE_HOURS_PREFERRED_START <= current_time.hour < TRADE_HOURS_PREFERRED_END
 
             total_scanned += 1
 
@@ -141,6 +164,11 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if score < WEAK_SIGNAL_THRESHOLD:
                 dbg_score_rejected += 1
                 continue
+
+            # ── FILTER: high score caution (score > 80 = exhaustion signal) ─────
+            if score > 80:
+                logger.info(f"Candle {i}: high score {score} - CAUTION: possible exhaustion")
+                # Continue but log warning
 
             # ── FILTER: daily loss cap ────────────────────────────────────────
             day_date = str(current_time)[:10]
@@ -243,6 +271,14 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 if day_date not in trades_per_day:
                     trades_per_day[day_date] = {"count": 0, "losses": 0}
                 trades_per_day[day_date]["losses"] += 1
+                consecutive_sl_hits += 1
+            else:
+                consecutive_sl_hits = 0
+
+            # ── FILTER: consecutive SL auto-stop ─────────────────────────────────
+            if consecutive_sl_hits >= CONSECUTIVE_SL_STOP:
+                logger.warning(f"Auto-stop: {consecutive_sl_hits} consecutive SL hits, pausing bot")
+                break
 
             logger.info(
                 f"TRADE #{signals_found} | {symbol} {day_date} {str(current_time)[11:16]} | "
@@ -281,7 +317,8 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             f"pos_open={dbg_position_skipped} "
             f"score<{WEAK_SIGNAL_THRESHOLD}={dbg_score_rejected} "
             f"cooldown={dbg_cooldown_skipped} "
-            f"loss_cap={dbg_loss_cap_skipped}"
+            f"loss_cap={dbg_loss_cap_skipped} "
+            f"days={dbg_day_filtered} blackout={dbg_blackout_filtered}"
         )
         return results
 

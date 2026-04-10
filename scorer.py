@@ -52,7 +52,7 @@ def calculate_score(df: pd.DataFrame, trend_bonus: int = 0) -> tuple[int, str]:
         score += 5
         reasons.append("RSI_oversold_warning")
     elif 30 <= rsi < 45:
-        score += 10
+        score += 15
         reasons.append("RSI_recovering")
     elif 45 <= rsi < 65:
         score += 10
@@ -69,16 +69,15 @@ def calculate_score(df: pd.DataFrame, trend_bonus: int = 0) -> tuple[int, str]:
         score += 12 if bb_expanding else 8
         reasons.append("BB_lower_zone_expanding" if bb_expanding else "BB_lower_zone")
     elif latest['close'] <= latest['BBM_20_2']:   # NOW SAFE: BBM_20_2 exists
-        score += 5
+        score += 10
         reasons.append("BB_below_mid")
     elif latest['close'] >= latest['BBU_20_2']:
         score -= 10
         reasons.append("BB_upper_penalty")
 
     # ── ADX / Trend strength ─────────────────────────────────────────────────
-    if latest['ADX_14'] > 20:
-        score += 10
-        reasons.append("ADX_trending")
+    # ADX removed as positive score (causes "top buyer" signal per audit)
+    # Kept for informational purposes only
 
     # ── Volume scoring ────────────────────────────────────────────────────────
     if vol_ratio >= 1.5:
