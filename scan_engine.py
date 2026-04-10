@@ -52,14 +52,8 @@ def check_4h_trend(symbol: str, as_of_time: pd.Timestamp = None) -> bool:
 
 
 def determine_regime(df: pd.DataFrame, as_of_time: pd.Timestamp = None) -> str:
-    """
-    Determine market regime based on r9.txt:
-    - LONG: Price > EMA200 AND EMA50 > EMA200 OR 4h_bullish
-    - SHORT: Price < EMA200 AND EMA50 < EMA200 OR 4h_bearish
-    - NEUTRAL: Price within 0.5% of EMA200 (sleep mode)
-    """
     if len(df) < 2:
-        return "LONG"  # Default to LONG if insufficient data
+        return "NEUTRAL"
     
     df = compute_indicators(df)
     latest = df.iloc[-1]
@@ -68,31 +62,26 @@ def determine_regime(df: pd.DataFrame, as_of_time: pd.Timestamp = None) -> str:
     ema200 = float(latest['EMA_200'])
     ema50 = float(latest['EMA_50'])
     
-    # Check Neutral Zone (within 0.5% of EMA200)
     pct_from_ema = abs(close - ema200) / ema200 * 100
     if pct_from_ema <= NEUTRAL_ZONE_PCT:
         return "NEUTRAL"
     
-    # Check Long conditions
     long_condition = (close > ema200 and ema50 > ema200)
-    
-    # Check Short conditions
     short_condition = (close < ema200 and ema50 < ema200)
     
-    # Get 4h trend
-    if as_of_time is not None:
-        trend_bullish = check_4h_trend("BTC/USDT", as_of_time)
-    else:
-        trend_bullish = True
-    
-    # Apply 4h trend override
-    if long_condition or trend_bullish:
+    if long_condition:
         return "LONG"
-    elif short_condition or not trend_bullish:
+    elif short_condition:
         return "SHORT"
     
-    # Default to NEUTRAL if unclear
-    return "NEUTRAL"
+    trend_bullish = False
+    if as_of_time is not None:
+        trend_bullish = check_4h_trend("BTC/USDT", as_of_time)
+    
+    if trend_bullish:
+        return "LONG"
+    else:
+        return "SHORT"
 
 
 def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) -> list:
@@ -288,7 +277,7 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
                 trail_activate = TRAIL_ACTIVATE_SHORT
                 max_hold = MAX_HOLD_CANDLES_SHORT
 
-            entry_price = window.iloc[-1]['close'] * 1.001   # +0.1% slippage
+            entry_price = window.iloc[-1]['close'] * (1.001 if direction == "LONG" else 0.999)
 
             hold_candles = min(max_hold, total_candles - i - 1)
             if hold_candles < 1:
@@ -303,9 +292,9 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
             mfe_pct = ((future['high'].max() - entry_price) / entry_price) * 100
             mae_pct = ((entry_price - future['low'].min()) / entry_price) * 100
 
-            tp_price        = entry_price * (1 + tp_percent / 100)
-            sl_price        = entry_price * (1 - sl_percent / 100)
-            partial_tp_price = entry_price * (1 + trail_activate / 100)
+            tp_price        = entry_price * (1 + tp_percent / 100) if direction == "LONG" else entry_price * (1 - tp_percent / 100)
+            sl_price        = entry_price * (1 - sl_percent / 100) if direction == "LONG" else entry_price * (1 + sl_percent / 100)
+            partial_tp_price = entry_price * (1 + trail_activate / 100) if direction == "LONG" else entry_price * (1 - trail_activate / 100)
 
             partial_tp_hit = False
             trailing_sl    = sl_price
@@ -416,6 +405,7 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
 
             results.append({
                 "date":             day_date,
+                "direction":        direction,
                 "entry_time":       str(current_time)[11:16],
                 "exit_time":        str(exit_time)[11:16],
                 "score":            score,

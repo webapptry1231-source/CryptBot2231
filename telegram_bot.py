@@ -6,14 +6,16 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
-                    TIMEFRAME, CANDLES_NEEDED, SCAN_INTERVAL_SECONDS, SIMULATION_MODE,
+                    TIMEFRAME, CANDLES_NEEDED, SCAN_INTERVAL_SECONDS,
                     STRONG_SIGNAL_THRESHOLD, WEAK_SIGNAL_THRESHOLD,
-                    HISTORIC_MODE, LIVE_MODE, HYBRID_MODE, HISTORICAL_DAYS, SCAN_DATE, LEVERAGE,
-                    TP_PERCENT, SL_PERCENT, FEE_PERCENT, BUY_AMOUNT, MAX_HOLD_CANDLES)
+                    HISTORICAL_DAYS, SCAN_DATE, LEVERAGE,
+                    TP_LONG_PERCENT, TP_SHORT_PERCENT,
+                    SL_LONG_PERCENT, SL_SHORT_PERCENT,
+                    BUY_AMOUNT, MAX_HOLD_CANDLES)
 
 MAX_OPEN_TRADES = 3
 from data_fetcher import fetch_ohlcv
-from scan_engine import scan_daily_historical, check_4h_trend
+from scan_engine import scan_daily_historical, check_4h_trend, determine_regime
 from signal_formatter import format_signal_message
 from trade_logger import init_db, log_signal, log_backtest_trade
 from concurrent.futures import ThreadPoolExecutor
@@ -31,34 +33,38 @@ def scan_coin(symbol: str) -> dict:
         if current_hour < TRADE_HOURS_START or current_hour >= TRADE_HOURS_END:
             return {"symbol": symbol, "score": 0, "reason": "outside_trade_hours", "price": 0, "error": None}
         
-        # BTC Master Switch: If BTC is bearish, disable altcoin LONGs
         if symbol != "BTC/USDT":
             btc_bullish = check_4h_trend("BTC/USDT")
             if not btc_bullish:
                 return {"symbol": symbol, "score": 0, "reason": "btc_bearish_block", "price": 0, "error": None}
         
-        if not check_4h_trend(symbol):
-            return {"symbol": symbol, "score": 0, "reason": "4h_bearish", "price": 0, "error": None}
-        
         df = fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=CANDLES_NEEDED)
         df = compute_indicators(df)
-        score, reason = calculate_score(df)
+        
+        direction = determine_regime(df)
+        
+        if direction == "NEUTRAL":
+            return {"symbol": symbol, "score": 0, "reason": "neutral_regime", "price": 0, "error": None}
+        
+        score, reason = calculate_score(df, direction=direction)
         
         if score < WEAK_SIGNAL_THRESHOLD or "low_volume" in reason:
             return {"symbol": symbol, "score": 0, "reason": reason, "price": 0, "error": None}
         
         price = df.iloc[-1]['close']
-        return {"symbol": symbol, "score": score, "reason": reason, "price": price, "error": None}
+        return {"symbol": symbol, "score": score, "reason": reason, "price": price, "direction": direction, "error": None}
     except Exception as e:
         return {"symbol": symbol, "score": 0, "reason": "", "price": 0, "error": str(e)}
 
 def calculate_summary(results: list) -> dict:
     if not results:
-        return {"total": 0, "tp": 0, "sl": 0, "profit": 0, "loss": 0, "win_rate": 0, "total_pnl": 0, "total_pnl_usd": 0}
+        return {"total": 0, "tp": 0, "sl": 0, "profit": 0, "loss": 0, "win_rate": 0, "total_pnl": 0, "total_pnl_usd": 0, "long_wins": 0, "short_wins": 0}
     
-    # Count wins based on actual PnL > 0 (includes TP HIT, TRAIL STOP, TIMEOUT profit)
     wins = sum(1 for r in results if r['pnl_usd_after_fee'] > 0)
     losses = sum(1 for r in results if r['pnl_usd_after_fee'] < 0)
+    
+    long_wins = sum(1 for r in results if r.get('direction') == "LONG" and r['pnl_usd_after_fee'] > 0)
+    short_wins = sum(1 for r in results if r.get('direction') == "SHORT" and r['pnl_usd_after_fee'] > 0)
     
     tp = sum(1 for r in results if r['result'] == "TP HIT")
     sl = sum(1 for r in results if r['result'] == "SL HIT")
@@ -66,7 +72,6 @@ def calculate_summary(results: list) -> dict:
     timeout = sum(1 for r in results if r['result'] == "TIMEOUT")
     
     total = len(results)
-    
     total_pnl_usd = sum(r['pnl_usd_after_fee'] for r in results)
     
     return {
@@ -77,29 +82,36 @@ def calculate_summary(results: list) -> dict:
         "timeout": timeout,
         "wins": wins,
         "losses": losses,
+        "long_wins": long_wins,
+        "short_wins": short_wins,
         "win_rate": round((wins / total) * 100, 1) if total > 0 else 0,
         "total_pnl": round(sum(r['pnl_after_fee'] for r in results), 2),
         "total_pnl_usd": round(total_pnl_usd, 2)
     }
 
 async def run_historical_scan(send_func):
+    all_results = []
+    
     if SCAN_DATE:
         logger.info(f"Starting SURGICAL scan for {SCAN_DATE}...")
         await send_func(f"📊 SURGICAL DAILY REPORT: {SCAN_DATE}\n🔄 {LEVERAGE}x, ${BUY_AMOUNT}")
-        symbol = COINS[0]
-        results = scan_daily_historical(symbol, target_date=SCAN_DATE)
+        for symbol in COINS:
+            results = scan_daily_historical(symbol, target_date=SCAN_DATE)
+            all_results.extend(results)
     else:
         logger.info(f"Starting HISTORICAL scan for {HISTORICAL_DAYS} days...")
         await send_func(f"📊 Starting Historical Scan\n🔄 {HISTORICAL_DAYS} days, {LEVERAGE}x, ${BUY_AMOUNT}")
-        symbol = COINS[0]
-        results = scan_daily_historical(symbol, days=HISTORICAL_DAYS)
+        for symbol in COINS:
+            results = scan_daily_historical(symbol, days=HISTORICAL_DAYS)
+            all_results.extend(results)
+    
+    results = all_results
     
     if not results:
         await send_func("❌ No scan results generated")
         return
     
     results = results[:500]
-    
     summary = calculate_summary(results)
     
     if SCAN_DATE:
@@ -110,29 +122,24 @@ async def run_historical_scan(send_func):
     msg += f"💰 Buy: ${BUY_AMOUNT} × {LEVERAGE}x = ${BUY_AMOUNT * LEVERAGE}\n"
     msg += f"📈 Total Trades: {summary['total']}\n"
     msg += f"✅ Wins: {summary.get('wins', summary['tp']+summary.get('trail',0))} | ❌ Losses: {summary.get('losses', summary['sl'])}\n"
+    msg += f"🔺 Long Wins: {summary.get('long_wins', 0)} | 🔻 Short Wins: {summary.get('short_wins', 0)}\n"
     msg += f"🎯 Win Rate: {summary['win_rate']}%\n"
     msg += f"💵 Total PnL: ${summary['total_pnl_usd']:.2f}\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    
+    for r in results:
+        emoji = "✅" if r['pnl_usd_after_fee'] > 0 else "❌"
+        direction_emoji = "🔺" if r.get('direction') == "LONG" else "🔻"
+        notional = r['buy_amount'] * r['leverage']
+        msg += f"{emoji}{direction_emoji} {r['date']} {r['entry_time']} → {r['exit_time']}\n"
+        msg += f"📌 {r['entry']} → {r['exit']}\n"
+        msg += f"🛑 SL:{r['sl']} | 🎯 TP:{r['tp']}\n"
+        msg += f"📦 ${notional} | Hold:{r['hold_hours']}h\n"
+        msg += f"💵 PnL: ${r['pnl_usd_after_fee']:.2f} ({r['pnl_after_fee']:.2f}%) | {r['result']}\n"
+        msg += f"📊 Score:{r['score']} | {r['reason'][:50]}\n"
+        msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     
     await send_func(msg)
-    
-    chunk_size = 10
-    for i in range(0, len(results), chunk_size):
-        chunk = results[i:i+chunk_size]
-        msg = ""
-        for r in chunk:
-            emoji = "✅" if r['pnl_usd_after_fee'] > 0 else "❌"
-            notional = r['buy_amount'] * r['leverage']
-            qty = notional / r['entry']
-            msg += f"{emoji} {r['date']} {r['entry_time']} → {r['exit_time']}\n"
-            msg += f"📌 {r['entry']} → {r['exit']}\n"
-            msg += f"🛑 SL:{r['sl']} | 🎯 TP:{r['tp']}\n"
-            msg += f"📦 ${notional} | Qty:{qty:.4f} BTC | Hold:{r['hold_hours']}h\n"
-            msg += f"📈 MFE:{r.get('mfe_pct', 0)}% | MAE:{r.get('mae_pct', 0)}%\n"
-            msg += f"💵 PnL: ${r['pnl_usd_after_fee']:.2f} ({r['pnl_after_fee']:.2f}%) | {r['result']}\n"
-            msg += f"📊 Score:{r['score']} | {r['reason']}\n"
-            msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        await send_func(msg)
     
     logger.info(f"Historical scan complete: {summary['total']} trades, PnL: ${summary['total_pnl_usd']}")
     
@@ -175,29 +182,27 @@ async def run_live_scan(send_func) -> list[str]:
         
         if score >= WEAK_SIGNAL_THRESHOLD:
             logger.info(f"SIGNAL: {symbol} qualifies with score {score}")
-            msg = format_signal_message(symbol, score, reason, price)
+            direction = r.get('direction', 'LONG')
+            msg = format_signal_message(symbol, score, reason, price, direction)
             if msg:
                 await send_func(msg)
                 messages.append(msg)
                 await asyncio.sleep(0.5)
-                tp = round(price * (1 + TP_PERCENT/100), 4)
-                sl = round(price * (1 - SL_PERCENT/100), 4)
+                if direction == "LONG":
+                    tp = round(price * (1 + TP_LONG_PERCENT / 100), 4)
+                    sl = round(price * (1 - SL_LONG_PERCENT / 100), 4)
+                else:
+                    tp = round(price * (1 - TP_SHORT_PERCENT / 100), 4)
+                    sl = round(price * (1 + SL_SHORT_PERCENT / 100), 4)
                 log_signal(symbol, score, reason, price, tp, sl)
     
     return messages
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mode = "SIMULATION" if SIMULATION_MODE else "LIVE"
-    mode_info = []
-    if HISTORIC_MODE: mode_info.append("HISTORICAL")
-    if LIVE_MODE: mode_info.append("LIVE")
-    if HYBRID_MODE: mode_info.append("HYBRID")
-    mode_str = ", ".join(mode_info) if mode_info else "LIVE"
-    
+    mode = os.getenv("MODE", "SURGICAL")
     await update.message.reply_text(
         f"✅ CryptoSignalBot\n"
         f"Mode: {mode}\n"
-        f"Type: {mode_str}\n"
         f"Leverage: {LEVERAGE}x\n"
         f"Historical Days: {HISTORICAL_DAYS}\n"
         f"Max Hold: {MAX_HOLD_CANDLES * 15 // 60}h\n"
@@ -210,7 +215,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def reply(msg: str):
         await update.message.reply_text(msg)
 
-    if HISTORIC_MODE:
+    if SCAN_DATE:
         await run_historical_scan(reply)
     else:
         found = await run_live_scan(reply)
@@ -229,7 +234,7 @@ async def scheduled_scan(context: ContextTypes.DEFAULT_TYPE):
     async def send_to_chat(msg: str):
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
     
-    if HISTORIC_MODE:
+    if SCAN_DATE:
         await run_historical_scan(send_to_chat)
     else:
         await run_live_scan(send_to_chat)
@@ -242,10 +247,10 @@ def main():
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CommandHandler("help", cmd_help))
     
-    if not HISTORIC_MODE:
+    if not SCAN_DATE:
         app.job_queue.run_repeating(scheduled_scan, interval=SCAN_INTERVAL_SECONDS, first=10)
     
-    logger.info(f"Bot started. Historic:{HISTORIC_MODE}, Live:{LIVE_MODE}, Hybrid:{HYBRID_MODE}")
+    logger.info(f"Bot started. Mode: {os.getenv('MODE', 'SURGICAL')}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
