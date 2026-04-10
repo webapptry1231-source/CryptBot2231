@@ -539,16 +539,11 @@ async def cmd_config_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
         coins = [c.strip().upper() for c in text.split(",") if c.strip()]
         user_config["coins"] = coins if coins else COINS
     
-    await show_confirmation(update)
-    return CONFIRM_SETUP
-
-
-async def show_confirmation(update: Update):
-    """Show final configuration and run"""
+    # Show config and run immediately
     mode = user_config.get("mode", "LIVE")
     date = user_config.get("scan_date", "N/A")
     days = user_config.get("days", "N/A")
-    coins = user_config.get("coins", COINS)
+    coins_list = user_config.get("coins", COINS)
     
     mode_emoji = {"LIVE": "🔴", "HISTORICAL": "🟡", "SURGICAL": "🔵"}.get(mode, "⚪")
     
@@ -557,7 +552,7 @@ async def show_confirmation(update: Update):
         f"Mode  : {mode_emoji} {mode}\n"
         f"Date  : {date}\n"
         f"Days  : {days}\n"
-        f"Coins : {', '.join(coins)}\n\n"
+        f"Coins : {', '.join(coins_list)}\n\n"
         f"🚀 Starting scan...",
         parse_mode="Markdown"
     )
