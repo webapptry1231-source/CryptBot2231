@@ -142,6 +142,33 @@ def calculate_summary(results: list) -> dict:
     timeout    = sum(1 for r in results if r["result"] == "TIMEOUT")
     total      = len(results)
 
+    # Score-bucket analysis for IMPROVE-03
+    buckets = {"65-69":[], "70-74":[], "75-79":[], "80-84":[], "85-90":[], "91+":[]}
+    for r in results:
+        s = r["score"]
+        if s < 70:
+            key = "65-69"
+        elif s < 75:
+            key = "70-74"
+        elif s < 80:
+            key = "75-79"
+        elif s < 85:
+            key = "80-84"
+        elif s <= 90:
+            key = "85-90"
+        else:
+            key = "91+"
+        buckets[key].append(r)
+    
+    score_buckets = {
+        k: {
+            "n": len(v),
+            "wr": round(sum(1 for x in v if x["pnl_usd_after_fee"]>0)/len(v)*100, 1) if v else 0,
+            "pnl": round(sum(x["pnl_usd_after_fee"] for x in v), 2)
+        }
+        for k, v in buckets.items()
+    }
+
     return {
         "total":         total,
         "tp":            tp,
@@ -151,10 +178,11 @@ def calculate_summary(results: list) -> dict:
         "wins":          wins,
         "losses":        losses,
         "long_wins":     long_wins,
-        "short_wins":    short_wins,
+        "short_wins":   short_wins,
         "win_rate":      round(wins / total * 100, 1) if total else 0,
         "total_pnl":     round(sum(r["pnl_after_fee"]    for r in results), 2),
         "total_pnl_usd": round(sum(r["pnl_usd_after_fee"] for r in results), 2),
+        "score_buckets": score_buckets,
     }
 
 
@@ -163,8 +191,10 @@ def calculate_summary(results: list) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def run_historical_scan(send_func, scan_date=None, days=None, coins=None, force_historical=False, end_date=None):
-    # Clear 4h cache once before scanning all symbols
+    # Clear caches before scanning
+    from scan_engine import _4h_cache, _daily_cache
     _4h_cache.clear()
+    _daily_cache.clear()
     
     # Determine actual values:
     # - If scan_date/days passed explicitly (not None), use them

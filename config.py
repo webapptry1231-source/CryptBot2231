@@ -40,32 +40,34 @@ SESSION_MIN_SCORE = 73
 # ── Exit strategy ────────────────────────────────────────────────────────────
 PARTIAL_TP_PERCENT = 1.0    # When profit hits 1%, close 50%
 PARTIAL_TP_SIZE = 0.5       # Close 50% of position
-TIMEOUT_HOURS = 3.0         # Max hold time in hours (3.0h = 12 candles)
+TIMEOUT_HOURS = 2.5         # Max hold time in hours (2.5h = 10 candles)
 
 # ── Long settings ────────────────────────────────────────────────────────────
 TP_LONG_PERCENT    = 2.0
 SL_LONG_PERCENT    = 1.0
 TRAIL_ACTIVATE_LONG = 1.0
-MAX_HOLD_CANDLES_LONG = 20    # 5 hours on 15m chart
+MAX_HOLD_CANDLES_LONG = 10    # 2.5 hours on 15m chart
 
 # ── Short settings (tighter) ─────────────────────────────────────────────────
 TP_SHORT_PERCENT    = 1.8
 SL_SHORT_PERCENT    = 1.0
 TRAIL_ACTIVATE_SHORT = 1.0
-MAX_HOLD_CANDLES_SHORT = 24   # 6 hours
+MAX_HOLD_CANDLES_SHORT = 10   # 2.5 hours
 
 # ── Trailing stop ────────────────────────────────────────────────────────────
-TRAILING_STOP_PERCENT = 0.8   # allow trade to breathe
+TRAILING_STOP_PERCENT = 1.5   # wider trail = let winners run to 2:1 TP
 
 # ── ATR-based SL/TP (adaptive sizing) ────────────────────────────────────────
 ENABLE_ATR_SL    = os.getenv("ENABLE_ATR_SL", "true").lower() == "true"
 ATR_SL_MULTIPLIER = 1.5    # SL = ATR × 1.5
 ATR_TP_RR         = 2.0    # TP = SL × 2.0  (2:1 RR minimum)
-ATR_SL_MIN_PCT    = 0.5    # floor: never tighter than 0.5%
+ATR_SL_MIN_PCT    = 1.0    # floor: never tighter than 1.0% (covers 15m noise)
 ATR_SL_MAX_PCT    = 2.0    # ceiling: never wider than 2.0%
 
 # ── Fee model ────────────────────────────────────────────────────────────────
-FEE_PERCENT = 0.05   # 0.05% per side → 0.10% round-trip
+FEE_PERCENT = 0.06   # 0.06% taker fee per side → 0.12% round-trip
+SLIPPAGE_PERCENT = 0.10   # 0.10% market order slippage per side
+TOTAL_COST_PCT = (FEE_PERCENT + SLIPPAGE_PERCENT) * 2  # = 0.32% round-trip
 
 # ── Position sizing ──────────────────────────────────────────────────────────
 BUY_AMOUNT = float(os.getenv("BUY_AMOUNT", "100"))
@@ -86,15 +88,19 @@ DAILY_LOSS_CAP         = 3      # stop trading a symbol after 3 losses in a day
 CONSECUTIVE_SL_STOP    = 3      # halt entire scan after 3 consecutive SL hits
 TRADE_HOURS_START      = 6      # UTC — no trades before this hour
 TRADE_HOURS_END        = 22     # UTC — no trades at/after this hour
-TRADE_HOURS_BLACKOUT_START = 13.75  # 13:45 UTC - no trade zone
+TRADE_HOURS_BLACKOUT_START = 13.75  # 13:45 UTC - no trade zone (DEPRECATED - use BLACKOUT_START_H/M)
+BLACKOUT_START_H = 13
+BLACKOUT_START_M = 30  # 13:30 UTC
+BLACKOUT_END_H = 16
+BLACKOUT_END_M = 0    # 16:00 UTC
 TRADE_HOURS_BLACKOUT_END   = 16     # 16:00 UTC - no trade zone
 NEUTRAL_ZONE_PCT       = 0.5    # % band around EMA200 = sleep zone
 TRADE_DAYS_BLOCKED     = [5]    # 5 = Saturday (Sunday=6 not blocked)
 
 # ── Per-symbol SL overrides ───────────────────────────────────────────────────
 SL_OVERRIDES = {
-    "DOGE/USDT": 0.8,
-    "SOL/USDT":  0.7,
-    "AVAX/USDT": 0.7,
-    "LINK/USDT": 0.6,
+    "DOGE/USDT": 1.2,
+    "SOL/USDT":  1.1,
+    "AVAX/USDT": 1.1,
+    "LINK/USDT": 1.0,
 }

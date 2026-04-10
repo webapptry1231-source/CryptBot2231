@@ -46,8 +46,9 @@ from config import (
     TRAILING_STOP_PERCENT, LEVERAGE, BUY_AMOUNT,
     SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
     TRADE_HOURS_BLACKOUT_START, TRADE_HOURS_BLACKOUT_END,
+    BLACKOUT_START_H, BLACKOUT_START_M, BLACKOUT_END_H, BLACKOUT_END_M,
     NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED, SL_OVERRIDES,
-    FEE_PERCENT, DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP,
+    FEE_PERCENT, SLIPPAGE_PERCENT, TOTAL_COST_PCT, DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP,
     ENABLE_ATR_SL, ATR_SL_MULTIPLIER, ATR_TP_RR, ATR_SL_MIN_PCT, ATR_SL_MAX_PCT,
     SCAN_DATE,
     SESSION_MORNING_START, SESSION_MORNING_END,
@@ -64,6 +65,27 @@ _4h_cache: dict = {}
 
 # Same-coin cooldown tracker: {symbol: last_trade_time}
 _last_trade_time: dict = {}
+
+# Daily data cache for EMA50 macro filter
+_daily_cache: dict = {}
+
+
+def get_daily_ema50(symbol: str, as_of_time: pd.Timestamp) -> float | None:
+    """Fetch daily EMA50 for macro regime filter - uses 1d timeframe"""
+    global _daily_cache
+    if symbol not in _daily_cache:
+        logger.info(f"Fetching daily data for {symbol} EMA50 (cache miss)")
+        df_d = fetch_historical_ohlcv(symbol, timeframe="1d", days_back=100)
+        if df_d is None or len(df_d) < 50:
+            logger.warning(f"Insufficient daily data for {symbol}")
+            return None
+        _daily_cache[symbol] = compute_indicators(df_d)
+    
+    df_slice = _daily_cache[symbol][_daily_cache[symbol].index <= as_of_time]
+    if len(df_slice) < 2:
+        return None
+    
+    return float(df_slice.iloc[-1]['EMA_50'])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -192,8 +214,11 @@ def _collect_session_candidates(
         if hour < TRADE_HOURS_START or hour >= TRADE_HOURS_END:
             continue
         
-        # Time-window blackout (13:45 - 16:00 UTC)
-        if TRADE_HOURS_BLACKOUT_START <= hour < TRADE_HOURS_BLACKOUT_END:
+        # Time-window blackout (13:30 - 16:00 UTC) with minute precision
+        candle_min = current_time.hour * 60 + current_time.minute
+        blackout_start_min = BLACKOUT_START_H * 60 + BLACKOUT_START_M
+        blackout_end_min = BLACKOUT_END_H * 60 + BLACKOUT_END_M
+        if blackout_start_min <= candle_min < blackout_end_min:
             continue
 
         # Blocked days gate (only Saturday blocked by default)
@@ -205,11 +230,19 @@ def _collect_session_candidates(
         if sess is None:
             continue
 
-        # Regime — refresh every 4 hours
+        # Regime — refresh every 1 hour
         if regime_check_time is None or \
-                (current_time - regime_check_time).total_seconds() >= 14400:
+                (current_time - regime_check_time).total_seconds() >= 3600:
             current_regime = determine_regime(df.iloc[:i], current_time)
             regime_check_time = current_time
+            
+            # 4h confirmation gate - require agreement between 15m and 4h
+            if current_regime != "NEUTRAL":
+                btc_bull = check_4h_trend("BTC/USDT", current_time)
+                if (current_regime == "LONG" and not btc_bull) or \
+                   (current_regime == "SHORT" and btc_bull):
+                    current_regime = "NEUTRAL"
+            
             logger.debug(f"Regime @ {current_time}: {current_regime}")
 
         if current_regime == "NEUTRAL":
@@ -240,13 +273,13 @@ def _collect_session_candidates(
         if (TOXIC_ZONE_MIN <= score <= TOXIC_ZONE_MAX) or (91 <= score <= 93):
             continue
 
-        # Macro Regime Filter: Price vs Daily EMA50
-        daily_ema50 = latest.get('EMA_50')
-        if daily_ema50:
+        # Macro Regime Filter: Price vs Daily EMA50 (1d timeframe)
+        d_ema50 = get_daily_ema50(symbol, current_time)
+        if d_ema50:
             current_price = latest['close']
-            if direction == "LONG" and current_price < daily_ema50:
+            if direction == "LONG" and current_price < d_ema50:
                 continue  # Block LONG when price below daily EMA50
-            if direction == "SHORT" and current_price > daily_ema50:
+            if direction == "SHORT" and current_price > d_ema50:
                 continue  # Block SHORT when price above daily EMA50
 
         if score >= SESSION_MIN_SCORE:
@@ -297,37 +330,18 @@ def _simulate_trade(
     # This avoids 0.0h instant SL hits
     if i + 1 >= len(df):
         return None
-    entry_price = float(df.iloc[i + 1]['open'])
+    raw_entry = float(df.iloc[i + 1]['open'])
+    # Apply slippage to entry price
+    if direction == "LONG":
+        entry_price = raw_entry * (1 + SLIPPAGE_PERCENT / 100)
+    else:
+        entry_price = raw_entry * (1 - SLIPPAGE_PERCENT / 100)
     current_time = df.index[i + 1]  # Entry happens at next candle
     
     # Check timeout (3 hours = 12 candles on 15m)
     max_candles_timeout = int(TIMEOUT_HOURS * 60 / 15)  # 12 candles
     hold_candles = min(max_hold, total_candles - i - 1, max_candles_timeout)
-
-    # ATR-based adaptive SL/TP with clamping
-    if ENABLE_ATR_SL:
-        atr_raw = df.iloc[i].get('ATR_14', None)
-        if atr_raw is not None:
-            atr_val = float(atr_raw)
-            if atr_val > 0:
-                raw_sl_pct = (atr_val * ATR_SL_MULTIPLIER / entry_price) * 100
-                sl_percent = max(ATR_SL_MIN_PCT, min(ATR_SL_MAX_PCT, raw_sl_pct))
-                tp_percent = sl_percent * ATR_TP_RR
-                # Keep trail_activate strictly inside TP range (60% of TP)
-                trail_activate = min(trail_activate, tp_percent * 0.6)
-
-    # Price levels
-    if direction == "LONG":
-        tp_price         = entry_price * (1 + tp_percent    / 100)
-        sl_price         = entry_price * (1 - sl_percent    / 100)
-        partial_tp_price = entry_price * (1 + PARTIAL_TP_PERCENT / 100)  # 1% partial TP
-    else:
-        tp_price         = entry_price * (1 - tp_percent    / 100)
-        sl_price         = entry_price * (1 + sl_percent    / 100)
-        partial_tp_price = entry_price * (1 - PARTIAL_TP_PERCENT / 100)  # 1% partial TP
-
-    hold_candles = min(max_hold, total_candles - i - 1)
-    future       = df.iloc[i: i + hold_candles]
+    future       = df.iloc[i + 1 : i + 1 + hold_candles]
 
     # MFE / MAE (direction-aware)
     if direction == "LONG":
@@ -446,7 +460,7 @@ def _simulate_trade(
         result = "TIMEOUT"
 
     hold_hours         = (exit_time - current_time).total_seconds() / 3600
-    fee_pct            = FEE_PERCENT * 2
+    fee_pct            = TOTAL_COST_PCT
     pnl_after_fee      = pnl_pct - fee_pct
     pnl_usd            = BUY_AMOUNT * LEVERAGE * (pnl_pct       / 100)
     pnl_usd_after_fee  = BUY_AMOUNT * LEVERAGE * (pnl_after_fee / 100)
