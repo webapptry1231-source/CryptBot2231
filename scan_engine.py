@@ -1,6 +1,6 @@
 import logging
 import pandas as pd
-from data_fetcher import fetch_historical_ohlcv
+from data_fetcher import fetch_historical_ohlcv, fetch_surgical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
 from config import (TIMEFRAME, TIMEFRAME_4H, WEAK_SIGNAL_THRESHOLD,
@@ -9,7 +9,7 @@ from config import (TIMEFRAME, TIMEFRAME_4H, WEAK_SIGNAL_THRESHOLD,
                     MAX_HOLD_CANDLES_LONG, MAX_HOLD_CANDLES_SHORT,
                     TRAILING_STOP_PERCENT, LEVERAGE, BUY_AMOUNT,
                     DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
-                    NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED, TEST_DATES,
+                    NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED, TEST_DATES, SCAN_DATE, SURGICAL_MODE,
                     SL_OVERRIDES, MAX_CONCURRENT_TRADES,
                     FEE_PERCENT, DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP)
 
@@ -95,13 +95,26 @@ def determine_regime(df: pd.DataFrame, as_of_time: pd.Timestamp = None) -> str:
     return "NEUTRAL"
 
 
-def scan_daily_historical(symbol: str, days: int) -> list:
+def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) -> list:
     global _4h_cache
-    _4h_cache.clear()
+    _4h_cache.clear()  # Clear cache for fresh scan
 
     try:
-        logger.info(f"=== Starting scan for {symbol}, {days} days ===")
-        df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
+        # Determine mode: surgical (specific date) or historical (days back)
+        if SCAN_DATE or target_date:
+            scan_date = SCAN_DATE or target_date
+            logger.info(f"=== SURGICAL SCAN for {symbol} on {scan_date} ===")
+            df = fetch_surgical_ohlcv(symbol, timeframe=TIMEFRAME, target_date=scan_date)
+            if len(df) < 50:
+                logger.warning(f"Not enough data: {len(df)}")
+                return []
+            # Filter to only scan the target date
+            target_date_str = scan_date
+        else:
+            logger.info(f"=== Starting scan for {symbol}, {days} days ===")
+            df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
+            target_date_str = None
+
         logger.info(f"Fetched {len(df)} candles")
 
         if len(df) < 100:
@@ -151,10 +164,17 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         for i in range(24, total_candles - MAX_HOLD_CANDLES_LONG):
             current_time = df.index[i]
             
+            # ── FILTER: surgical date (SCAN_DATE) ───────────────────────────────────
+            if target_date_str:
+                current_date_only = current_time.strftime("%Y-%m-%d")
+                if current_date_only != target_date_str:
+                    total_scanned += 1
+                    continue
+            
             # ── FILTER: targeted dates (TEST_DATES) ───────────────────────────────
             if TEST_DATES:
-                current_date_str = current_time.strftime("%Y-%m-%d")
-                if current_date_str not in TEST_DATES:
+                test_date_only = current_time.strftime("%Y-%m-%d")
+                if test_date_only not in TEST_DATES:
                     total_scanned += 1
                     continue
             

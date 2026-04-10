@@ -95,3 +95,74 @@ def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int =
     days_covered = (df.index[-1] - df.index[0]).total_seconds() / 86400
     logger.info(f"FETCHED {len(df)} candles (~{days_covered:.1f} days) for {symbol} [{timeframe}]")
     return df
+
+
+def fetch_surgical_ohlcv(symbol: str, timeframe: str = "15m", target_date: str = None) -> pd.DataFrame:
+    """
+    Surgical mode: Fetch data for a specific date with 30-day warmup.
+    target_date format: "YYYY-MM-DD"
+    """
+    if target_date is None:
+        return fetch_historical_ohlcv(symbol, timeframe, days_back=90)
+    
+    logger.info(f"SURGICAL: Fetching data for {symbol} around {target_date}")
+    exchange = _get_exchange()
+
+    target = pd.Timestamp(target_date, tz='UTC')
+    # Start 30 days before target for EMA200 warmup
+    start_time = target - pd.Timedelta(days=30)
+    # End 1 day after target
+    end_time = target + pd.Timedelta(days=1)
+    
+    start_ms = int(start_time.timestamp() * 1000)
+    end_ms = int(end_time.timestamp() * 1000)
+
+    all_candles = []
+    batch_num = 0
+    current_start = start_ms
+
+    timeframe_ms = {
+        '1m': 60000, '5m': 300000, '15m': 900000,
+        '1h': 3600000, '4h': 14400000, '1d': 86400000
+    }.get(timeframe, 900000)
+
+    while current_start < end_ms:
+        batch_num += 1
+        try:
+            batch = exchange.fetch_ohlcv(
+                symbol, timeframe=timeframe, since=current_start, limit=1000
+            )
+
+            if not batch or len(batch) == 0:
+                break
+
+            all_candles.extend(batch)
+            last_ts = batch[-1][0]
+
+            if last_ts >= end_ms:
+                break
+
+            if len(batch) < 50:
+                break
+
+            current_start = last_ts + timeframe_ms
+            time.sleep(0.3)
+
+        except Exception as e:
+            logger.warning(f"Batch {batch_num} error: {e}")
+            break
+
+    if len(all_candles) < 100:
+        logger.warning(f"Only {len(all_candles)} candles for surgical scan")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+    df.set_index('timestamp', inplace=True)
+    df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'volume': float})
+    df = df[~df.index.duplicated(keep='last')]
+    df = df.sort_index()
+    df = df[df.index >= start_time]
+
+    logger.info(f"SURGICAL: {len(df)} candles for {target_date}")
+    return df

@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
                     TIMEFRAME, CANDLES_NEEDED, SCAN_INTERVAL_SECONDS, SIMULATION_MODE,
                     STRONG_SIGNAL_THRESHOLD, WEAK_SIGNAL_THRESHOLD,
-                    HISTORIC_MODE, LIVE_MODE, HYBRID_MODE, HISTORICAL_DAYS, LEVERAGE,
+                    HISTORIC_MODE, LIVE_MODE, HYBRID_MODE, HISTORICAL_DAYS, SCAN_DATE, LEVERAGE,
                     TP_PERCENT, SL_PERCENT, FEE_PERCENT, BUY_AMOUNT, MAX_HOLD_CANDLES)
 
 MAX_OPEN_TRADES = 3
@@ -83,11 +83,16 @@ def calculate_summary(results: list) -> dict:
     }
 
 async def run_historical_scan(send_func):
-    logger.info(f"Starting HISTORICAL scan for {HISTORICAL_DAYS} days...")
-    await send_func(f"📊 Starting Historical Scan\n🔄 {HISTORICAL_DAYS} days, {LEVERAGE}x, ${BUY_AMOUNT}")
-    
-    symbol = COINS[0]
-    results = scan_daily_historical(symbol, HISTORICAL_DAYS)
+    if SCAN_DATE:
+        logger.info(f"Starting SURGICAL scan for {SCAN_DATE}...")
+        await send_func(f"📊 SURGICAL DAILY REPORT: {SCAN_DATE}\n🔄 {LEVERAGE}x, ${BUY_AMOUNT}")
+        symbol = COINS[0]
+        results = scan_daily_historical(symbol, target_date=SCAN_DATE)
+    else:
+        logger.info(f"Starting HISTORICAL scan for {HISTORICAL_DAYS} days...")
+        await send_func(f"📊 Starting Historical Scan\n🔄 {HISTORICAL_DAYS} days, {LEVERAGE}x, ${BUY_AMOUNT}")
+        symbol = COINS[0]
+        results = scan_daily_historical(symbol, days=HISTORICAL_DAYS)
     
     if not results:
         await send_func("❌ No scan results generated")
@@ -97,11 +102,15 @@ async def run_historical_scan(send_func):
     
     summary = calculate_summary(results)
     
-    msg = f"📊 BTC BACKTEST SUMMARY ({HISTORICAL_DAYS} days)\n"
+    if SCAN_DATE:
+        msg = f"📊 SURGICAL REPORT: {SCAN_DATE}\n"
+    else:
+        msg = f"📊 BTC BACKTEST SUMMARY ({HISTORICAL_DAYS} days)\n"
     msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"💰 Buy: ${BUY_AMOUNT} × {LEVERAGE}x = ${BUY_AMOUNT * LEVERAGE}\n"
     msg += f"📈 Total Trades: {summary['total']}\n"
-    msg += f"✅ TP: {summary['tp']} | ❌ SL: {summary['sl']} | 🎯 Win: {summary['win_rate']}%\n"
+    msg += f"✅ Wins: {summary.get('wins', summary['tp']+summary.get('trail',0))} | ❌ Losses: {summary.get('losses', summary['sl'])}\n"
+    msg += f"🎯 Win Rate: {summary['win_rate']}%\n"
     msg += f"💵 Total PnL: ${summary['total_pnl_usd']:.2f}\n"
     msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     

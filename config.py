@@ -51,13 +51,17 @@ LIVE_MODE = os.getenv("LIVE_MODE", "false").lower() == "true"
 HYBRID_MODE = os.getenv("HYBRID_MODE", "false").lower() == "true"
 
 HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "90"))
+SCAN_DATE = os.getenv("SCAN_DATE", "")  # Surgical mode: specific date (YYYY-MM-DD)
+SURGICAL_MODE = os.getenv("SURGICAL_MODE", "false").lower() == "true"
 BUY_AMOUNT = float(os.getenv("BUY_AMOUNT", "50"))
 
 # Targeted testing: comma-separated dates (e.g., "2026-01-13,2026-01-14")
 _test_dates_raw = os.getenv("TEST_DATES", "")
 TEST_DATES = [d.strip() for d in _test_dates_raw.split(",") if d.strip()]
 
-if TEST_DATES:
+if SCAN_DATE:
+    print(f"SURGICAL MODE: Scanning {SCAN_DATE}")
+elif TEST_DATES:
     print(f"TARGETED TESTING: Scanning only dates: {TEST_DATES}")
 else:
     print(f"GLOBAL TESTING: Scanning all {HISTORICAL_DAYS} days")
