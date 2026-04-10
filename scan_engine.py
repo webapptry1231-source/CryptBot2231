@@ -9,9 +9,9 @@ from config import (TIMEFRAME, TIMEFRAME_4H, WEAK_SIGNAL_THRESHOLD,
                     MAX_HOLD_CANDLES_LONG, MAX_HOLD_CANDLES_SHORT,
                     TRAILING_STOP_PERCENT, LEVERAGE, BUY_AMOUNT,
                     DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
-                    NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED, TEST_DATES, SCAN_DATE, SURGICAL_MODE,
-                    SL_OVERRIDES, MAX_CONCURRENT_TRADES,
-                    FEE_PERCENT, DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP)
+                    NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED, SL_OVERRIDES, MAX_CONCURRENT_TRADES,
+                    FEE_PERCENT, DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP,
+                    ENABLE_ATR_SL, ATR_SL_MULTIPLIER, ATR_TP_RR, ATR_SL_MIN_PCT, ATR_SL_MAX_PCT)
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +85,6 @@ def determine_regime(df: pd.DataFrame, as_of_time: pd.Timestamp = None) -> str:
 
 
 def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) -> list:
-    global _4h_cache
-    _4h_cache.clear()  # Clear cache for fresh scan
-
     try:
         # Determine mode: surgical (specific date) or historical (days back)
         if SCAN_DATE or target_date:
@@ -150,20 +147,14 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
             f"DAILY_CAP={DAILY_TRADE_CAP}, LOSS_CAP={DAILY_LOSS_CAP}"
         )
 
-        for i in range(24, total_candles - MAX_HOLD_CANDLES_LONG):
+        max_hold_buffer = max(MAX_HOLD_CANDLES_LONG, MAX_HOLD_CANDLES_SHORT)
+        for i in range(24, total_candles - max_hold_buffer):
             current_time = df.index[i]
             
             # ── FILTER: surgical date (SCAN_DATE) ───────────────────────────────────
             if target_date_str:
                 current_date_only = current_time.strftime("%Y-%m-%d")
                 if current_date_only != target_date_str:
-                    total_scanned += 1
-                    continue
-            
-            # ── FILTER: targeted dates (TEST_DATES) ───────────────────────────────
-            if TEST_DATES:
-                test_date_only = current_time.strftime("%Y-%m-%d")
-                if test_date_only not in TEST_DATES:
                     total_scanned += 1
                     continue
             
@@ -291,16 +282,23 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
                 open_positions[symbol] = False
                 continue
 
-            mfe_pct = ((future['high'].max() - entry_price) / entry_price) * 100
-            mae_pct = ((entry_price - future['low'].min()) / entry_price) * 100
+            if direction == "LONG":
+                mfe_pct = ((future['high'].max() - entry_price) / entry_price) * 100
+                mae_pct = ((entry_price - future['low'].min()) / entry_price) * 100
+            else:  # SHORT
+                mfe_pct = ((entry_price - future['low'].min()) / entry_price) * 100
+                mae_pct = ((future['high'].max() - entry_price) / entry_price) * 100
             
-            atr_val = window.iloc[-1].get('ATR_14')
-            if atr_val and atr_val > 0:
-                sl_distance = atr_val * 1.5
-                sl_percent = (sl_distance / entry_price) * 100
-                tp_percent_new = sl_percent * 2.0
-                if tp_percent_new > 0:
-                    tp_percent = tp_percent_new
+            if ENABLE_ATR_SL:
+                atr_val = float(window.iloc[-1].get('ATR_14', 0) or 0)
+                if atr_val > 0:
+                    raw_sl_pct = (atr_val * ATR_SL_MULTIPLIER / entry_price) * 100
+                    sl_percent = max(ATR_SL_MIN_PCT, min(ATR_SL_MAX_PCT, raw_sl_pct))
+                    tp_percent = sl_percent * ATR_TP_RR
+                    if direction == "LONG":
+                        trail_activate = min(trail_activate, tp_percent * 0.6)
+                    else:
+                        trail_activate = min(trail_activate, tp_percent * 0.6)
             
             tp_price        = entry_price * (1 + tp_percent / 100) if direction == "LONG" else entry_price * (1 - tp_percent / 100)
             sl_price        = entry_price * (1 - sl_percent / 100) if direction == "LONG" else entry_price * (1 + sl_percent / 100)
@@ -434,6 +432,7 @@ def scan_daily_historical(symbol: str, target_date: str = None, days: int = 90) 
                 "hold_hours":       round(hold_hours, 1),
                 "mfe_pct":          round(mfe_pct, 2),
                 "mae_pct":          round(mae_pct, 2),
+                "symbol":           symbol,
             })
 
         logger.info(

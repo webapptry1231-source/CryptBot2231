@@ -33,21 +33,18 @@ SL_SHORT_PERCENT = 1.0
 TRAIL_ACTIVATE_SHORT = 1.0
 MAX_HOLD_CANDLES_SHORT = 24
 
-# Legacy (for backward compatibility)
-TP_PERCENT = 0.7
-SL_PERCENT = 1.0
-MAX_HOLD_CANDLES = 32
-FEE_PERCENT = 0.05
-PARTIAL_TP_PERCENT = 0.5
-PARTIAL_TP_SIZE = 0.5
-
-MODE = os.getenv("MODE", "")
+MODE = os.getenv("MODE", "SURGICAL")
 SCAN_DATE = os.getenv("SCAN_DATE", "")
-SURGICAL_MODE = os.getenv("SURGICAL_MODE", "false").lower() == "true"
 HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "90"))
 
-_test_dates_raw = os.getenv("TEST_DATES", "")
-TEST_DATES = [d.strip() for d in _test_dates_raw.split(",") if d.strip()]
+# ATR-based SL/TP configuration
+ATR_SL_MULTIPLIER = 1.5
+ATR_TP_RR = 2.0
+ATR_SL_MIN_PCT = 0.5
+ATR_SL_MAX_PCT = 2.0
+ENABLE_ATR_SL = os.getenv("ENABLE_ATR_SL", "true").lower() == "true"
+
+FEE_PERCENT = 0.05
 
 BUY_AMOUNT = float(os.getenv("BUY_AMOUNT", "150"))
 

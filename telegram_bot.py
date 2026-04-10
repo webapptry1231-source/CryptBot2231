@@ -11,7 +11,7 @@ from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
                     HISTORICAL_DAYS, SCAN_DATE, LEVERAGE,
                     TP_LONG_PERCENT, TP_SHORT_PERCENT,
                     SL_LONG_PERCENT, SL_SHORT_PERCENT,
-                    BUY_AMOUNT, MAX_HOLD_CANDLES)
+                    BUY_AMOUNT, MAX_HOLD_CANDLES_LONG, MAX_HOLD_CANDLES_SHORT)
 
 MAX_OPEN_TRADES = 3
 import threading
@@ -50,8 +50,6 @@ def scan_coin(symbol: str) -> dict:
             btc_4h_bullish = check_4h_trend("BTC/USDT")
             if (direction == "LONG" and btc_4h_bullish) or (direction == "SHORT" and not btc_4h_bullish):
                 btc_bonus = 5
-        
-        score, reason = calculate_score(df, trend_bonus=btc_bonus, direction=direction)
         
         score, reason = calculate_score(df, trend_bonus=btc_bonus, direction=direction)
         
@@ -97,6 +95,9 @@ def calculate_summary(results: list) -> dict:
     }
 
 async def run_historical_scan(send_func):
+    from scan_engine import _4h_cache
+    _4h_cache.clear()
+    
     all_results = []
     
     if SCAN_DATE:
@@ -134,19 +135,25 @@ async def run_historical_scan(send_func):
     msg += f"💵 Total PnL: ${summary['total_pnl_usd']:.2f}\n"
     msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     
+    await send_func(msg)
+    
     for r in results:
         emoji = "✅" if r['pnl_usd_after_fee'] > 0 else "❌"
         direction_emoji = "🔺" if r.get('direction') == "LONG" else "🔻"
         notional = r['buy_amount'] * r['leverage']
-        msg += f"{emoji}{direction_emoji} {r['date']} {r['entry_time']} → {r['exit_time']}\n"
-        msg += f"📌 {r['entry']} → {r['exit']}\n"
-        msg += f"🛑 SL:{r['sl']} | 🎯 TP:{r['tp']}\n"
-        msg += f"📦 ${notional} | Hold:{r['hold_hours']}h\n"
-        msg += f"💵 PnL: ${r['pnl_usd_after_fee']:.2f} ({r['pnl_after_fee']:.2f}%) | {r['result']}\n"
-        msg += f"📊 Score:{r['score']} | {r['reason'][:50]}\n"
-        msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    
-    await send_func(msg)
+        trade_msg = (
+            f"{emoji}{direction_emoji} {r.get('symbol','BTC/USDT')} "
+            f"{r['date']} {r['entry_time']} → {r['exit_time']}\n"
+            f"📌 {r['entry']} → {r['exit']}\n"
+            f"🛑 SL:{r['sl']} | 🎯 TP:{r['tp']}\n"
+            f"📦 ${notional:.0f} | Hold:{r['hold_hours']}h\n"
+            f"📈 MFE:{r.get('mfe_pct',0)}% | MAE:{r.get('mae_pct',0)}%\n"
+            f"💵 PnL: ${r['pnl_usd_after_fee']:.2f} "
+            f"({r['pnl_after_fee']:.2f}%) | {r['result']}\n"
+            f"📊 Score:{r['score']} | {r['reason'][:60]}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        await send_func(trade_msg)
     
     logger.info(f"Historical scan complete: {summary['total']} trades, PnL: ${summary['total_pnl_usd']}")
     
@@ -224,7 +231,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Mode: {mode}\n"
         f"Leverage: {LEVERAGE}x\n"
         f"Historical Days: {HISTORICAL_DAYS}\n"
-        f"Max Hold: {MAX_HOLD_CANDLES * 15 // 60}h\n"
+        f"Max Hold Long: {MAX_HOLD_CANDLES_LONG * 15 // 60}h | Short: {MAX_HOLD_CANDLES_SHORT * 15 // 60}h\n"
         f"Coins: {COINS}"
     )
 
@@ -269,10 +276,7 @@ async def scheduled_scan(context: ContextTypes.DEFAULT_TYPE):
     async def send_to_chat(msg: str):
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
     
-    if SCAN_DATE:
-        await run_historical_scan(send_to_chat)
-    else:
-        await run_live_scan(send_to_chat)
+    await run_live_scan(send_to_chat)
 
 def main():
     init_db()
@@ -283,7 +287,7 @@ def main():
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("daily", cmd_daily))
     
-    if not SCAN_DATE:
+    if not SCAN_DATE and os.getenv("MODE", "SURGICAL") == "LIVE":
         app.job_queue.run_repeating(scheduled_scan, interval=SCAN_INTERVAL_SECONDS, first=10)
     
     logger.info(f"Bot started. Mode: {os.getenv('MODE', 'SURGICAL')}")

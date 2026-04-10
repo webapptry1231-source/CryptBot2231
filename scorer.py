@@ -156,9 +156,14 @@ def calculate_score(df: pd.DataFrame, trend_bonus: int = 0, direction: str = "LO
 
     # ── EMA20 Stack Alignment ─────────────────────────────────────────────────
     ema20 = latest.get('EMA_20', close)
-    if ema20 and close > ema20 and ema20 > ema50:
-        score += 8
-        reasons.append("EMA20_stack_bullish" if direction == "LONG" else "EMA20_stack_bearish")
+    if direction == "LONG":
+        if ema20 and close > ema20 and ema20 > ema50:
+            score += 8
+            reasons.append("EMA20_stack_bullish")
+    else:  # SHORT
+        if ema20 and close < ema20 and ema20 < ema50:
+            score += 8
+            reasons.append("EMA20_stack_bearish")
 
     # ── Stochastic RSI ─────────────────────────────────────────────────
     stoch_k = latest.get('STOCHRSI_K', 50)
