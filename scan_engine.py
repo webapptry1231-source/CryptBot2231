@@ -219,6 +219,12 @@ def _collect_session_candidates(
 
         score, reason = calculate_score(window, trend_bonus=trend_bonus, direction=direction)
 
+        # Skip if BB is too wide (choppy coin)
+        latest = window.iloc[-1]
+        bb_width_pct = (latest['BBU_20_2'] - latest['BBL_20_2']) / latest['close'] * 100
+        if bb_width_pct > 4.0:   # >4% Bollinger width = chop
+            continue
+
         if score >= SESSION_MIN_SCORE:
             candidates[sess].append({
                 "idx":       i,

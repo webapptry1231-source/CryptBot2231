@@ -96,6 +96,11 @@ def calculate_score(df: pd.DataFrame, trend_bonus: int = 0, direction: str = "LO
         elif macd_hist < 0 and prev_macd_hist >= 0:
             score += 8
             reasons.append("MACD_hist_negative")
+    
+    # Penalize high-score MACD crossovers (exhaustion trap)
+    if ("MACD_crossover" in reasons or "MACD_crossdown" in reasons) and score > 75:
+        score -= 15
+        reasons.append("MACD_exhaustion_penalty")
 
     # ── 4. RSI (max 15 pts) ──────────────────────────────────────────────────
     rsi = float(latest.get('RSI_14', 50))

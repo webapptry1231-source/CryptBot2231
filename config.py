@@ -20,8 +20,8 @@ SCAN_INTERVAL_SECONDS = 900
 # ── Signal quality thresholds ────────────────────────────────────────────────
 # WEAK_SIGNAL_THRESHOLD : minimum score to qualify as a signal at all
 # STRONG_SIGNAL_THRESHOLD: score that earns "STRONG" label in Telegram message
-WEAK_SIGNAL_THRESHOLD   = 60
-STRONG_SIGNAL_THRESHOLD = 75   # lowered from 80; 80 was unreachable on most days
+WEAK_SIGNAL_THRESHOLD   = 65
+STRONG_SIGNAL_THRESHOLD = 78   # lowered from 80; 80 was unreachable on most days
 
 # ── Session windows (UTC hours, inclusive start, exclusive end) ──────────────
 # The engine picks the single BEST-scoring candle inside each session.
@@ -33,12 +33,12 @@ SESSION_AFTERNOON_END   = 22  # 22:00 UTC  (exclusive → last candle at 21:45)
 
 # Minimum score a session's best candle must reach to actually fire a signal.
 # Keeps quality high; prevents scraping the barrel on quiet days.
-SESSION_MIN_SCORE = 62
+SESSION_MIN_SCORE = 68
 
 # ── Long settings ────────────────────────────────────────────────────────────
 TP_LONG_PERCENT    = 2.0
 SL_LONG_PERCENT    = 1.0
-TRAIL_ACTIVATE_LONG = 1.2
+TRAIL_ACTIVATE_LONG = 1.0
 MAX_HOLD_CANDLES_LONG = 20    # 5 hours on 15m chart
 
 # ── Short settings (tighter) ─────────────────────────────────────────────────
@@ -48,7 +48,7 @@ TRAIL_ACTIVATE_SHORT = 1.0
 MAX_HOLD_CANDLES_SHORT = 24   # 6 hours
 
 # ── Trailing stop ────────────────────────────────────────────────────────────
-TRAILING_STOP_PERCENT = 0.6   # single definition — no more double-assignment bug
+TRAILING_STOP_PERCENT = 0.4   # single definition — no more double-assignment bug
 
 # ── ATR-based SL/TP (adaptive sizing) ────────────────────────────────────────
 ENABLE_ATR_SL    = os.getenv("ENABLE_ATR_SL", "true").lower() == "true"
@@ -61,8 +61,8 @@ ATR_SL_MAX_PCT    = 2.0    # ceiling: never wider than 2.0%
 FEE_PERCENT = 0.05   # 0.05% per side → 0.10% round-trip
 
 # ── Position sizing ──────────────────────────────────────────────────────────
-BUY_AMOUNT = float(os.getenv("BUY_AMOUNT", "150"))
-LEVERAGE   = int(os.getenv("LEVERAGE", "3"))
+BUY_AMOUNT = float(os.getenv("BUY_AMOUNT", "100"))
+LEVERAGE   = int(os.getenv("LEVERAGE", "2"))
 
 # ── Mode: SURGICAL (default) or LIVE ─────────────────────────────────────────
 # SURGICAL = test a specific past date via SCAN_DATE env var
