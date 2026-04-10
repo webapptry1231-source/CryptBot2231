@@ -7,31 +7,28 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     rsi_result = df.ta.rsi(length=14)
     if rsi_result is not None:
         df['RSI_14'] = rsi_result
-    
+
     macd = df.ta.macd(fast=12, slow=26, signal=9)
     if macd is not None:
         for col in macd.columns:
             df[col] = macd[col]
-    
+
     ema50 = df.ta.ema(length=50)
     if ema50 is not None:
-        if isinstance(ema50, pd.DataFrame):
-            df['EMA_50'] = ema50.iloc[:, -1]
-        else:
-            df['EMA_50'] = ema50
-    
+        df['EMA_50'] = ema50 if not isinstance(ema50, pd.DataFrame) else ema50.iloc[:, -1]
+
     ema200 = df.ta.ema(length=200)
     if ema200 is not None:
-        if isinstance(ema200, pd.DataFrame):
-            df['EMA_200'] = ema200.iloc[:, -1]
-        else:
-            df['EMA_200'] = ema200
-    
+        df['EMA_200'] = ema200 if not isinstance(ema200, pd.DataFrame) else ema200.iloc[:, -1]
+
     bbands = df.ta.bbands(length=20, std=2)
     if bbands is not None:
+        # Extract all three Bollinger Band lines: lower, mid, upper
         bb_lower_col = [c for c in bbands.columns if c.startswith('BBL')][0]
+        bb_mid_col   = [c for c in bbands.columns if c.startswith('BBM')][0]
         bb_upper_col = [c for c in bbands.columns if c.startswith('BBU')][0]
         df['BBL_20_2'] = bbands[bb_lower_col]
+        df['BBM_20_2'] = bbands[bb_mid_col]     # FIX: was missing in V5/V6 → KeyError crash
         df['BBU_20_2'] = bbands[bb_upper_col]
 
     adx_result = df.ta.adx(length=14)
