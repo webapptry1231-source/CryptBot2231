@@ -50,11 +50,15 @@ def calculate_summary(results: list) -> dict:
     if not results:
         return {"total": 0, "tp": 0, "sl": 0, "profit": 0, "loss": 0, "win_rate": 0, "total_pnl": 0, "total_pnl_usd": 0}
     
+    # Count wins based on actual PnL > 0 (includes TP HIT, TRAIL STOP, TIMEOUT profit)
+    wins = sum(1 for r in results if r['pnl_usd_after_fee'] > 0)
+    losses = sum(1 for r in results if r['pnl_usd_after_fee'] < 0)
+    
     tp = sum(1 for r in results if r['result'] == "TP HIT")
     sl = sum(1 for r in results if r['result'] == "SL HIT")
-    profit = sum(1 for r in results if r['result'] == "PROFIT")
-    loss = sum(1 for r in results if r['result'] == "LOSS")
-    wins = tp + profit
+    trail = sum(1 for r in results if r['result'] == "TRAIL STOP")
+    timeout = sum(1 for r in results if r['result'] == "TIMEOUT")
+    
     total = len(results)
     
     total_pnl_usd = sum(r['pnl_usd_after_fee'] for r in results)
@@ -63,8 +67,10 @@ def calculate_summary(results: list) -> dict:
         "total": total,
         "tp": tp,
         "sl": sl,
-        "profit": profit,
-        "loss": loss,
+        "trail": trail,
+        "timeout": timeout,
+        "wins": wins,
+        "losses": losses,
         "win_rate": round((wins / total) * 100, 1) if total > 0 else 0,
         "total_pnl": round(sum(r['pnl_after_fee'] for r in results), 2),
         "total_pnl_usd": round(total_pnl_usd, 2)
