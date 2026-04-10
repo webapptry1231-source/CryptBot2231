@@ -9,7 +9,7 @@ from config import (TIMEFRAME, TIMEFRAME_4H, WEAK_SIGNAL_THRESHOLD,
                     MAX_HOLD_CANDLES_LONG, MAX_HOLD_CANDLES_SHORT,
                     TRAILING_STOP_PERCENT, LEVERAGE, BUY_AMOUNT,
                     DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
-                    NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED,
+                    NEUTRAL_ZONE_PCT, TRADE_DAYS_BLOCKED, TEST_DATES,
                     SL_OVERRIDES, MAX_CONCURRENT_TRADES,
                     FEE_PERCENT, DAILY_LOSS_CAP, CONSECUTIVE_SL_STOP)
 
@@ -150,7 +150,14 @@ def scan_daily_historical(symbol: str, days: int) -> list:
 
         for i in range(24, total_candles - MAX_HOLD_CANDLES_LONG):
             current_time = df.index[i]
-
+            
+            # ── FILTER: targeted dates (TEST_DATES) ───────────────────────────────
+            if TEST_DATES:
+                current_date_str = current_time.strftime("%Y-%m-%d")
+                if current_date_str not in TEST_DATES:
+                    total_scanned += 1
+                    continue
+            
             # refresh regime every 4 hours
             if regime_check_time is None or \
                (current_time - regime_check_time).total_seconds() / 3600 >= 4:

@@ -53,6 +53,15 @@ HYBRID_MODE = os.getenv("HYBRID_MODE", "false").lower() == "true"
 HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "90"))
 BUY_AMOUNT = float(os.getenv("BUY_AMOUNT", "50"))
 
+# Targeted testing: comma-separated dates (e.g., "2026-01-13,2026-01-14")
+_test_dates_raw = os.getenv("TEST_DATES", "")
+TEST_DATES = [d.strip() for d in _test_dates_raw.split(",") if d.strip()]
+
+if TEST_DATES:
+    print(f"TARGETED TESTING: Scanning only dates: {TEST_DATES}")
+else:
+    print(f"GLOBAL TESTING: Scanning all {HISTORICAL_DAYS} days")
+
 DAILY_TRADE_CAP = 999
 SIGNAL_COOLDOWN_HOURS = 1.0
 TRADE_HOURS_START = 7   # 07:00 UTC
