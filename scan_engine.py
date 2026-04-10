@@ -17,8 +17,14 @@ def check_4h_trend(symbol: str) -> bool:
             return True
         df_4h = compute_indicators(df_4h)
         latest = df_4h.iloc[-1]
-        result = latest['close'] > latest['EMA_200']
-        logger.info(f"  4h check: {len(df_4h)} candles, EMA200={latest['EMA_200']:.2f}, close={latest['close']:.2f} -> {'BULLISH' if result else 'BEARISH'}")
+        ema_val = latest['EMA_200']
+        if hasattr(ema_val, 'iloc'):
+            ema_val = ema_val.iloc[-1]
+        close_val = latest['close']
+        if hasattr(close_val, 'iloc'):
+            close_val = close_val.iloc[-1]
+        result = close_val > ema_val
+        logger.info(f"  4h check: {len(df_4h)} candles, EMA200={ema_val:.2f}, close={close_val:.2f} -> {'BULLISH' if result else 'BEARISH'}")
         return result
     except Exception as e:
         logger.warning(f"4h trend check failed: {e}")

@@ -15,11 +15,17 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     
     ema50 = df.ta.ema(length=50)
     if ema50 is not None:
-        df['EMA_50'] = ema50
+        if isinstance(ema50, pd.DataFrame):
+            df['EMA_50'] = ema50.iloc[:, -1]
+        else:
+            df['EMA_50'] = ema50
     
     ema200 = df.ta.ema(length=200)
     if ema200 is not None:
-        df['EMA_200'] = ema200
+        if isinstance(ema200, pd.DataFrame):
+            df['EMA_200'] = ema200.iloc[:, -1]
+        else:
+            df['EMA_200'] = ema200
     
     bbands = df.ta.bbands(length=20, std=2)
     if bbands is not None:

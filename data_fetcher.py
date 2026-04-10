@@ -25,29 +25,41 @@ def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int =
     exchange = _get_exchange()
     
     now = pd.Timestamp.now(tz='UTC')
-    start_time = now - pd.Timedelta(days=days_back)
-    since_ms = int(start_time.timestamp() * 1000)
+    end_time = now
+    start_time = end_time - pd.Timedelta(days=days_back)
+    end_ms = int(end_time.timestamp() * 1000)
+    start_ms = int(start_time.timestamp() * 1000)
     
     all_candles = []
     batch_num = 0
+    current_start = start_ms
+    
+    timeframe_ms = {
+        '1m': 60000, '5m': 300000, '15m': 900000,
+        '1h': 3600000, '4h': 14400000, '1d': 86400000
+    }.get(timeframe, 900000)
     
     while True:
         batch_num += 1
         try:
-            batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=1000)
+            batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=current_start, limit=1000)
             
             if not batch or len(batch) == 0:
                 break
-                
-            all_candles.extend(batch)
-            last_ts = batch[-1][0]
-            since_ms = last_ts + 1
             
-            logger.info(f"  Batch {batch_num}: {len(batch)} candles (total: {len(all_candles)})")
+            all_candles.extend(batch)
+            
+            earliest_ts = batch[0][0]
+            current_start = earliest_ts - timeframe_ms
+            
+            logger.info(f"  Batch {batch_num}: {len(batch)} candles (earliest: {pd.Timestamp(earliest_ts, unit='ms', tz='UTC')})")
+            
+            if earliest_ts <= start_ms:
+                break
             
             if len(batch) < 1000:
                 break
-                
+            
             time.sleep(0.3)
             
         except Exception as e:
@@ -64,6 +76,8 @@ def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int =
     df = df.astype({'open': float, 'high': float, 'low': float, 'close': float, 'volume': float})
     df = df[~df.index.duplicated(keep='last')]
     df = df.sort_index()
+    
+    df = df[df.index >= start_time]
     
     days_covered = (df.index[-1] - df.index[0]).total_seconds() / 86400
     logger.info(f"Fetched {len(df)} candles (~{days_covered:.1f} days)")
