@@ -2,10 +2,8 @@ import ccxt
 import pandas as pd
 import time
 import logging
-import threading
 
 logger = logging.getLogger(__name__)
-_exchange_lock = threading.Lock()
 
 def _get_exchange():
     return ccxt.bybit({
@@ -14,9 +12,8 @@ def _get_exchange():
     })
 
 def fetch_ohlcv(symbol: str, timeframe: str = "15m", limit: int = 300) -> pd.DataFrame:
-    with _exchange_lock:
-        exchange = _get_exchange()
-        raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    exchange = _get_exchange()
+    raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
     df = pd.DataFrame(raw, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
     df.set_index('timestamp', inplace=True)
@@ -25,23 +22,40 @@ def fetch_ohlcv(symbol: str, timeframe: str = "15m", limit: int = 300) -> pd.Dat
 
 def fetch_historical_ohlcv(symbol: str, timeframe: str = "15m", days_back: int = 90) -> pd.DataFrame:
     logger.info(f"Fetching {days_back} days of {timeframe} data for {symbol}")
-    all_candles = []
     exchange = _get_exchange()
     
-    limit_needed = days_back * 96 if timeframe == "15m" else days_back * 6
-    limit_needed = min(limit_needed, 10000)
+    now = pd.Timestamp.now(tz='UTC')
+    start_time = now - pd.Timedelta(days=days_back)
+    since_ms = int(start_time.timestamp() * 1000)
     
-    max_retries = 5
-    for retry in range(max_retries):
+    all_candles = []
+    batch_num = 0
+    
+    while True:
+        batch_num += 1
         try:
-            all_candles = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit_needed)
-            break
+            batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=1000)
+            
+            if not batch or len(batch) == 0:
+                break
+                
+            all_candles.extend(batch)
+            last_ts = batch[-1][0]
+            since_ms = last_ts + 1
+            
+            logger.info(f"  Batch {batch_num}: {len(batch)} candles (total: {len(all_candles)})")
+            
+            if len(batch) < 1000:
+                break
+                
+            time.sleep(0.3)
+            
         except Exception as e:
-            logger.warning(f"Fetch retry {retry+1}: {e}")
-            time.sleep(2)
+            logger.warning(f"Batch {batch_num} error: {e}")
+            break
     
-    if not all_candles or len(all_candles) == 0:
-        logger.error("No candles fetched!")
+    if len(all_candles) < 100:
+        logger.error(f"Only {len(all_candles)} candles fetched!")
         return pd.DataFrame()
     
     df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])

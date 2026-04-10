@@ -14,8 +14,8 @@ MAX_OPEN_TRADES = 3
 
 def check_4h_trend(symbol: str) -> bool:
     try:
-        df_4h = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME_4H, days_back=7)
-        if len(df_4h) < 200:
+        df_4h = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME_4H, days_back=30)
+        if len(df_4h) < 50:
             return True
         df_4h = compute_indicators(df_4h)
         latest = df_4h.iloc[-1]
@@ -41,17 +41,15 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         total_candles = len(df)
         
         trend_bullish = check_4h_trend(symbol)
+        logger.info(f"4h trend check: {'BULLISH' if trend_bullish else 'BEARISH'}")
         
         trades_per_day = {}
         last_signal_time = {}
         total_scanned = 0
         signals_found = 0
-        scan_start_time = None
+        scan_start_time = df.index[0]
         
         for i in range(24, total_candles - MAX_HOLD_CANDLES):
-            if scan_start_time is None:
-                scan_start_time = df.index[0]
-            
             current_time = df.index[i]
             hours_elapsed = (current_time - scan_start_time).total_seconds() / 3600
             
@@ -63,9 +61,6 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             
             if not trend_bullish:
                 continue
-            
-            # if symbol in open_positions:
-            #     continue
             
             window = df.iloc[:i]
             if len(window) < 50:
