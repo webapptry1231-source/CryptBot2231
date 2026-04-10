@@ -1,5 +1,8 @@
 import asyncio
+import json
 import logging
+import os
+from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, COINS,
@@ -12,7 +15,7 @@ MAX_OPEN_TRADES = 3
 from data_fetcher import fetch_ohlcv
 from scan_engine import scan_daily_historical, check_4h_trend
 from signal_formatter import format_signal_message
-from trade_logger import init_db, log_signal
+from trade_logger import init_db, log_signal, log_backtest_trade
 from concurrent.futures import ThreadPoolExecutor
 from indicators import compute_indicators
 from scorer import calculate_score
@@ -111,6 +114,23 @@ async def run_historical_scan(send_func):
         await send_func(msg)
     
     logger.info(f"Historical scan complete: {summary['total']} trades, PnL: ${summary['total_pnl_usd']}")
+    
+    run_timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    
+    os.makedirs("logs", exist_ok=True)
+    with open(f"logs/backtest_{run_timestamp}.json", "w") as f:
+        json.dump({
+            "run_timestamp": run_timestamp,
+            "days": HISTORICAL_DAYS,
+            "leverage": LEVERAGE,
+            "buy_amount": BUY_AMOUNT,
+            "summary": summary,
+            "trades": results
+        }, f, indent=2)
+    logger.info(f"Saved backtest results to logs/backtest_{run_timestamp}.json")
+    
+    for trade in results:
+        log_backtest_trade(run_timestamp, trade)
 
 async def run_live_scan(send_func) -> list[str]:
     messages = []

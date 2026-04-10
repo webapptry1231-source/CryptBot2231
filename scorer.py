@@ -6,6 +6,10 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
 
     latest = df.iloc[-1]
     prev = df.iloc[-2]
+    
+    if latest['VOL_SMA_20'] <= 0 or latest['volume'] <= 1.15 * latest['VOL_SMA_20']:
+        return 0, "low_volume"
+
     score = 0
     reasons = []
 
@@ -16,6 +20,10 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
     if latest['EMA_50'] > latest['EMA_200']:
         score += 20
         reasons.append("EMA50>EMA200")
+
+    if latest['close'] > latest['BBL_20_2'] and latest['MACDh_12_26_9'] > 0:
+        score += 5
+        reasons.append("MACD_bullish")
 
     rsi = latest['RSI_14']
     if rsi < 30:
@@ -58,11 +66,8 @@ def calculate_score(df: pd.DataFrame) -> tuple[int, str]:
         score += 10
         reasons.append("ADX_trending")
 
-    if latest['VOL_SMA_20'] > 0 and latest['volume'] > 1.15 * latest['VOL_SMA_20']:
-        score += 10
-        reasons.append("volume_spike")
-    else:
-        return 0, "low_volume"
+    score += 10
+    reasons.append("volume_spike")
 
     score = max(0, min(100, score))
     reason_str = " + ".join(reasons) if reasons else "no_signal"

@@ -1,4 +1,5 @@
 import logging
+import pandas as pd
 from data_fetcher import fetch_historical_ohlcv
 from indicators import compute_indicators
 from scorer import calculate_score
@@ -6,13 +7,26 @@ from config import (TIMEFRAME, TIMEFRAME_4H, MAX_HOLD_CANDLES, WEAK_SIGNAL_THRES
                    TP_PERCENT, SL_PERCENT, LEVERAGE, BUY_AMOUNT,
                    DAILY_TRADE_CAP, SIGNAL_COOLDOWN_HOURS, TRADE_HOURS_START, TRADE_HOURS_END,
                    SL_OVERRIDES, MAX_CONCURRENT_TRADES,
-                   PARTIAL_TP_PERCENT, PARTIAL_TP_SIZE, TRAILING_STOP_PERCENT, FEE_PERCENT)
+                   PARTIAL_TP_PERCENT, PARTIAL_TP_SIZE, TRAILING_STOP_PERCENT, FEE_PERCENT,
+                   DAILY_LOSS_CAP)
 
 logger = logging.getLogger(__name__)
 
-def check_4h_trend(symbol: str) -> bool:
+_4h_cache = {}
+
+def get_4h_cached(symbol: str, days_back: int, end_time: pd.Timestamp) -> pd.DataFrame:
+    cache_key = f"{symbol}_{days_back}"
+    if cache_key not in _4h_cache:
+        logger.info(f"Fetching {days_back} days of 4h data for {symbol} (cache miss)")
+        _4h_cache[cache_key] = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME_4H, days_back=days_back)
+    df = _4h_cache[cache_key].copy()
+    df = df[df.index <= end_time]
+    return df
+
+def check_4h_trend(symbol: str, as_of_time: pd.Timestamp) -> bool:
     try:
-        df_4h = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME_4H, days_back=30)
+        days_back = 60
+        df_4h = get_4h_cached(symbol, days_back, as_of_time)
         if len(df_4h) < 50:
             return True
         df_4h = compute_indicators(df_4h)
@@ -24,13 +38,16 @@ def check_4h_trend(symbol: str) -> bool:
         if hasattr(close_val, 'iloc'):
             close_val = close_val.iloc[-1]
         result = close_val > ema_val
-        logger.info(f"  4h check: {len(df_4h)} candles, EMA200={ema_val:.2f}, close={close_val:.2f} -> {'BULLISH' if result else 'BEARISH'}")
+        logger.info(f"  4h check at {as_of_time}: EMA200={ema_val:.2f}, close={close_val:.2f} -> {'BULLISH' if result else 'BEARISH'}")
         return result
     except Exception as e:
         logger.warning(f"4h trend check failed: {e}")
         return True
 
 def scan_daily_historical(symbol: str, days: int) -> list:
+    global _4h_cache
+    _4h_cache.clear()
+    
     try:
         logger.info(f"=== Starting scan for {symbol}, {days} days ===")
         df = fetch_historical_ohlcv(symbol, timeframe=TIMEFRAME, days_back=days)
@@ -46,28 +63,39 @@ def scan_daily_historical(symbol: str, days: int) -> list:
         results = []
         total_candles = len(df)
         
-        trend_bullish = check_4h_trend(symbol)
+        last_check_time = None
+        trend_bullish = True
         
         trades_per_day = {}
         last_signal_time = {}
+        position_open = False
         total_scanned = 0
         signals_found = 0
-        scan_start_time = df.index[0]
         
-        logger.info(f"Scan config: WEAK_THRESHOLD={WEAK_SIGNAL_THRESHOLD}, COOLDOWN={SIGNAL_COOLDOWN_HOURS}, DAILY_CAP={DAILY_TRADE_CAP}")
+        logger.info(f"Scan config: WEAK_THRESHOLD={WEAK_SIGNAL_THRESHOLD}, COOLDOWN={SIGNAL_COOLDOWN_HOURS}, DAILY_CAP={DAILY_TRADE_CAP}, LOSS_CAP={DAILY_LOSS_CAP}")
         
         for i in range(24, total_candles - MAX_HOLD_CANDLES):
             current_time = df.index[i]
-            hours_elapsed = (current_time - scan_start_time).total_seconds() / 3600
             
-            if hours_elapsed >= 4:
-                trend_bullish = check_4h_trend(symbol)
-                scan_start_time = current_time
+            hours_since_check = 0
+            if last_check_time is not None:
+                hours_since_check = (current_time - last_check_time).total_seconds() / 3600
+            
+            if hours_since_check >= 4:
+                trend_bullish = check_4h_trend(symbol, current_time)
+                last_check_time = current_time
+            
+            if current_time.hour < TRADE_HOURS_START or current_time.hour >= TRADE_HOURS_END:
+                total_scanned += 1
+                continue
             
             total_scanned += 1
             
             if total_scanned % 200 == 0:
                 logger.info(f"Progress: {total_scanned}/{total_candles} candles, signals: {signals_found}")
+            
+            if position_open:
+                continue
             
             if not trend_bullish:
                 continue
@@ -90,6 +118,17 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             if "low_volume" in reason:
                 logger.info(f"Candle {i}: low_volume blocked (score={score})")
                 continue
+            
+            day_date = str(entry_time)[:10]
+            if day_date in trades_per_day and trades_per_day[day_date].get("losses", 0) >= DAILY_LOSS_CAP:
+                logger.info(f"Candle {i}: daily loss cap reached for {day_date}")
+                continue
+            
+            if symbol in last_signal_time:
+                hours_since = (entry_time - last_signal_time[symbol]).total_seconds() / 3600
+                if hours_since < SIGNAL_COOLDOWN_HOURS:
+                    logger.info(f"Candle {i}: cooldown active ({hours_since:.1f}h < {SIGNAL_COOLDOWN_HOURS}h)")
+                    continue
             
             signals_found += 1
             last_signal_time[symbol] = entry_time
@@ -141,28 +180,36 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 if partial_tp_hit and candle['high'] >= tp_price:
                     pnl_pct = TP_PERCENT
                     result = "TP HIT"
-                    exit_price = future.iloc[j]['high']
+                    exit_price = tp_price
                     exit_time = future.index[j]
+                    trade_closed = True
                     break
                 
                 if candle['low'] <= trailing_sl:
                     if partial_tp_hit:
-                        pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
+                        pnl_pct = ((trailing_sl - entry_price) / entry_price) * 100 * LEVERAGE
                         result = "TRAIL STOP"
                     else:
                         pnl_pct = -SL_PERCENT
                         result = "SL HIT"
-                    exit_price = candle['low']
+                    exit_price = sl_price
                     exit_time = future.index[j]
+                    trade_closed = True
                     break
             
             if not trade_closed:
+                timeout_candle = df.iloc[min(i + hold_candles - 1, len(df) - 1)]
+                exit_price = timeout_candle['close']
+                exit_time = timeout_candle.name
                 if exit_price > entry_price:
                     pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
-                    result = "PROFIT"
+                    result = "TIMEOUT"
                 else:
                     pnl_pct = ((exit_price - entry_price) / entry_price) * 100 * LEVERAGE
-                    result = "LOSS"
+                    result = "TIMEOUT"
+                trade_closed = True
+            
+            position_open = False
             
             hold_hours = (exit_time - entry_time).total_seconds() / 3600
             
@@ -172,14 +219,18 @@ def scan_daily_historical(symbol: str, days: int) -> list:
             pnl_usd = (BUY_AMOUNT * LEVERAGE) * (pnl_pct / 100)
             pnl_usd_after_fee = (BUY_AMOUNT * LEVERAGE) * (pnl_after_fee / 100)
             
-            day_date = str(entry_time)[:10]
             entry_time_str = str(entry_time)[11:16]
             exit_time_str = str(exit_time)[11:16]
+            
+            if "LOSS" in result or "SL" in result or "TIMEOUT" in result and pnl_pct < 0:
+                if day_date not in trades_per_day:
+                    trades_per_day[day_date] = {"count": 0, "losses": 0}
+                trades_per_day[day_date]["losses"] = trades_per_day[day_date].get("losses", 0) + 1
             
             logger.info(f"*** TRADE GENERATED: {symbol} {day_date} {entry_time_str}")
             logger.info(f"    Score: {score}, Reason: {reason}")
             logger.info(f"    Entry: {entry_price:.2f}, Exit: {exit_price:.2f}, TP: {tp_price:.2f}, SL: {sl_price:.2f}")
-            logger.info(f"    Result: {result}, PnL: {pnl_usd_after_fee:.2f}%, Hold: {hold_hours:.1f}h")
+            logger.info(f"    Result: {result}, PnL: {pnl_pct:.2f}% / ${pnl_usd_after_fee:.2f}, Hold: {hold_hours:.1f}h")
             
             results.append({
                 "date": day_date,
