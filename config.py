@@ -41,7 +41,7 @@ FEE_PERCENT = 0.05
 PARTIAL_TP_PERCENT = 0.5
 PARTIAL_TP_SIZE = 0.5
 
-MODE = os.getenv("MODE", "SURGICAL")
+MODE = os.getenv("MODE", "")
 SCAN_DATE = os.getenv("SCAN_DATE", "")
 SURGICAL_MODE = os.getenv("SURGICAL_MODE", "false").lower() == "true"
 HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "90"))
