@@ -24,7 +24,7 @@ from config import (
 )
 
 # Conversation states
-SELECT_MODE, SELECT_DATE, SELECT_DAYS, SELECT_COINS = range(4)
+SELECT_MODE, SELECT_DATE_DAYS, SELECT_DATE_CUSTOM, SELECT_DAYS_CUSTOM, SELECT_COINS, CONFIRM_SETUP = range(6)
 
 # User session data storage
 user_config = {
@@ -32,6 +32,26 @@ user_config = {
     "scan_date": None,
     "days": None,
     "coins": None,
+}
+
+# Quick date options (last 7 days)
+def get_date_options():
+    today = datetime.now().date()
+    return [
+        (today - timedelta(days=i)).strftime("%Y-%m-%d") 
+        for i in range(7)
+    ]
+
+# Quick days options
+DAYS_OPTIONS = ["7", "14", "30", "60", "90"]
+
+# Coin presets
+COIN_PRESETS = {
+    "BTC Only": ["BTC/USDT"],
+    "Top 3": ["BTC/USDT", "ETH/USDT", "SOL/USDT"],
+    "Top 5": ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
+    "Top 10": ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", 
+               "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "TON/USDT"],
 }
 
 from data_fetcher import fetch_ohlcv
@@ -322,13 +342,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start interactive configuration conversation"""
+    """Start interactive configuration - Reset and show mode selection"""
+    user_config["mode"] = None
+    user_config["scan_date"] = None
+    user_config["days"] = None
+    user_config["coins"] = None
+    
     keyboard = [
         [KeyboardButton("🔴 LIVE"), KeyboardButton("🟡 HISTORICAL"), KeyboardButton("🔵 SURGICAL")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
     await update.message.reply_text(
-        "⚙️ *Configure Scan*\n\nSelect scan mode:",
+        "⚙️ *Configure Scan*\n\n"
+        "Select scan mode:\n"
+        "• 🔴 LIVE - Real-time market scan\n"
+        "• 🟡 HISTORICAL - Backtest for X days\n"
+        "• 🔵 SURGICAL - Scan specific date",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -336,94 +365,285 @@ async def cmd_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_config_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle mode selection"""
+    """Handle mode selection with follow-up buttons"""
     text = update.message.text
+    
     if "LIVE" in text:
         user_config["mode"] = "LIVE"
+        keyboard = [
+            [KeyboardButton("✅ Confirm")],
+            [KeyboardButton("🔄 Change")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
         await update.message.reply_text(
-            "✅ Mode set to LIVE\n\nEnter number of days to scan (e.g., 7, 30, 90):",
-            reply_markup=None
+            "✅ *LIVE Mode Selected*\n\n"
+            "This will scan the current market for live signals.\n\n"
+            "Continue with coins selection or change mode?",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
-        return SELECT_DAYS
+        return SELECT_DATE_DAYS
+        
     elif "HISTORICAL" in text:
         user_config["mode"] = "HISTORICAL"
+        # Show days options as buttons
+        keyboard = [
+            [KeyboardButton("7 Days"), KeyboardButton("14 Days"), KeyboardButton("30 Days")],
+            [KeyboardButton("60 Days"), KeyboardButton("90 Days"), KeyboardButton("Custom")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
         await update.message.reply_text(
-            "✅ Mode set to HISTORICAL\n\nEnter number of days to scan (e.g., 7, 30, 90):",
-            reply_markup=None
+            "✅ *HISTORICAL Mode Selected*\n\n"
+            "Select number of days to scan:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
-        return SELECT_DAYS
+        return SELECT_DATE_DAYS
+        
     elif "SURGICAL" in text:
         user_config["mode"] = "SURGICAL"
+        # Show recent date options as buttons
+        date_options = get_date_options()
+        keyboard = []
+        row = []
+        for i, date in enumerate(date_options):
+            row.append(KeyboardButton(date))
+            if (i + 1) % 3 == 0:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        keyboard.append([KeyboardButton("📅 Custom Date")])
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
         await update.message.reply_text(
-            "✅ Mode set to SURGICAL\n\nEnter date to scan (YYYY-MM-DD format, e.g., 2026-04-01):",
-            reply_markup=None
+            "✅ *SURGICAL Mode Selected*\n\n"
+            "Select a date to scan (last 7 days):",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
-        return SELECT_DATE
+        return SELECT_DATE_DAYS
     else:
-        await update.message.reply_text("Invalid selection. Try /config again.")
+        await update.message.reply_text("❌ Invalid selection. Try /config again.")
         return ConversationHandler.END
 
 
-async def cmd_config_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle surgical date input"""
+async def cmd_config_date_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle date/days selection with confirmation"""
+    text = update.message.text.strip()
+    mode = user_config.get("mode")
+    
+    # Handle LIVE mode
+    if mode == "LIVE":
+        if "Confirm" in text:
+            await show_coin_selection(update)
+            return SELECT_COINS
+        elif "Change" in text:
+            await cmd_config_start(update, context)
+            return SELECT_MODE
+    
+    # Handle HISTORICAL mode - days selection
+    if mode == "HISTORICAL":
+        if text.endswith("Days"):
+            days = int(text.split()[0])
+            user_config["days"] = days
+        elif text == "Custom":
+            await update.message.reply_text(
+                "Enter number of days (1-365):",
+                reply_markup=None
+            )
+            return SELECT_DAYS_CUSTOM
+        else:
+            await update.message.reply_text("Select from the options or type Custom")
+            return SELECT_DATE_DAYS
+        
+        # Show confirmation with days
+        keyboard = [
+            [KeyboardButton("✅ Confirm"), KeyboardButton("🔄 Change")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        await update.message.reply_text(
+            f"✅ *Days Selected: {user_config['days']} days*\n\n"
+            "Continue to coin selection?",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return SELECT_DATE_DAYS
+    
+    # Handle SURGICAL mode - date selection
+    if mode == "SURGICAL":
+        if text == "📅 Custom Date":
+            await update.message.reply_text(
+                "Enter date in format YYYY-MM-DD (e.g., 2026-04-01):",
+                reply_markup=None
+            )
+            return SELECT_DATE_CUSTOM
+        elif len(text) == 10 and text[4] == "-" and text[7] == "-":
+            # Validate date format
+            try:
+                datetime.strptime(text, "%Y-%m-%d")
+                user_config["scan_date"] = text
+            except:
+                await update.message.reply_text("❌ Invalid date. Use YYYY-MM-DD format.")
+                return SELECT_DATE_DAYS
+        else:
+            await update.message.reply_text("Select from the date buttons or choose Custom Date")
+            return SELECT_DATE_DAYS
+        
+        # Show confirmation with date
+        keyboard = [
+            [KeyboardButton("✅ Confirm"), KeyboardButton("🔄 Change")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        await update.message.reply_text(
+            f"✅ *Date Selected: {user_config['scan_date']}*\n\n"
+            "Continue to coin selection?",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return SELECT_DATE_DAYS
+    
+    await update.message.reply_text("❌ Session expired. Start /config again.")
+    return ConversationHandler.END
+
+
+async def cmd_config_date_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle custom date input"""
     text = update.message.text.strip()
     try:
-        from datetime import datetime
-        datetime.strptime(text, "%Y-%m-%d")
-        user_config["scan_date"] = text
+        date = datetime.strptime(text, "%Y-%m-%d").strftime("%Y-%m-%d")
+        # Check not in future
+        if datetime.strptime(date, "%Y-%m-%d").date() > datetime.now().date():
+            await update.message.reply_text("❌ Cannot scan future dates.")
+            return SELECT_DATE_CUSTOM
+        user_config["scan_date"] = date
+        
+        keyboard = [
+            [KeyboardButton("✅ Confirm"), KeyboardButton("🔄 Change")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
         await update.message.reply_text(
-            f"✅ Date set to {text}\n\nNow select coins to scan:\n"
-            f"Current: {', '.join(COINS)}\n"
-            f"Enter coin symbols separated by comma (e.g., BTC/USDT, ETH/USDT, SOL/USDT)\n"
-            f"Or press Skip to use default.",
-            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("Skip")]], one_time_keyboard=True)
+            f"✅ *Date Selected: {date}*\n\n"
+            "Continue to coin selection?",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
-        return SELECT_COINS
+        return SELECT_DATE_DAYS
     except ValueError:
-        await update.message.reply_text("❌ Invalid date format. Use YYYY-MM-DD (e.g., 2026-04-01)")
-        return ConversationHandler.END
+        await update.message.reply_text(
+            "❌ Invalid format. Use YYYY-MM-DD (e.g., 2026-04-01)"
+        )
+        return SELECT_DATE_CUSTOM
 
 
-async def cmd_config_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle historical days input"""
+async def cmd_config_days_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle custom days input"""
     text = update.message.text.strip()
     try:
         days = int(text)
         if days < 1 or days > 365:
             await update.message.reply_text("❌ Days must be between 1 and 365")
-            return SELECT_DAYS
+            return SELECT_DAYS_CUSTOM
         user_config["days"] = days
+        
+        keyboard = [
+            [KeyboardButton("✅ Confirm"), KeyboardButton("🔄 Change")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
         await update.message.reply_text(
-            f"✅ Days set to {days}\n\nNow select coins to scan:\n"
-            f"Current: {', '.join(COINS)}\n"
-            f"Enter coin symbols separated by comma (e.g., BTC/USDT, ETH/USDT, SOL/USDT)\n"
-            f"Or press Skip to use default.",
-            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("Skip")]], one_time_keyboard=True)
+            f"✅ *Days Selected: {days} days*\n\n"
+            "Continue to coin selection?",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
-        return SELECT_COINS
+        return SELECT_DATE_DAYS
     except ValueError:
-        await update.message.reply_text("❌ Invalid number. Enter a whole number like 30 or 90.")
-        return SELECT_DAYS
+        await update.message.reply_text("❌ Enter a valid number (1-365)")
+        return SELECT_DAYS_CUSTOM
+
+
+async def show_coin_selection(update: Update):
+    """Show coin selection with presets"""
+    keyboard = [
+        [KeyboardButton(k)] for k in COIN_PRESETS.keys()
+    ]
+    keyboard.append([KeyboardButton("✏️ Custom")])
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+    
+    presets_text = "\n".join([f"• {k}: {', '.join(v)}" for k, v in COIN_PRESETS.items()])
+    
+    await update.message.reply_text(
+        f"🪙 *Select Coins*\n\n"
+        f"{presets_text}\n"
+        f"• ✏️ Custom - Enter your own\n\n"
+        f"Default: {', '.join(COINS)}",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
 
 
 async def cmd_config_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle coins selection"""
+    """Handle coins selection with presets"""
     text = update.message.text.strip()
-    if text == "Skip":
-        user_config["coins"] = COINS
-    else:
-        coins = [c.strip().upper() for c in text.split(",") if c.strip()]
-        user_config["coins"] = coins if coins else COINS
     
-    mode = user_config["mode"]
+    if text in COIN_PRESETS:
+        user_config["coins"] = COIN_PRESETS[text]
+    elif text == "✏️ Custom":
+        await update.message.reply_text(
+            f"Enter coins separated by comma:\n"
+            f"e.g., BTC/USDT, ETH/USDT, SOL/USDT\n\n"
+            f"Available: {', '.join(COINS)}",
+            reply_markup=None
+        )
+        return SELECT_COINS
+    else:
+        # Assume custom input
+        coins = [c.strip().upper() for c in text.split(",") if c.strip()]
+        if coins:
+            user_config["coins"] = coins
+        else:
+            user_config["coins"] = COINS
+    
+    # Show final confirmation
+    await show_confirmation(update)
+    return CONFIRM_SETUP
+
+
+async def show_confirmation(update: Update):
+    """Show final configuration confirmation"""
+    mode = user_config.get("mode", "LIVE")
+    date = user_config.get("scan_date", "N/A")
+    days = user_config.get("days", "N/A")
+    coins = user_config.get("coins", COINS)
+    
+    mode_emoji = {"LIVE": "🔴", "HISTORICAL": "🟡", "SURGICAL": "🔵"}.get(mode, "⚪")
+    
+    keyboard = [
+        [KeyboardButton("🚀 Run Scan"), KeyboardButton("🔄 Reconfigure")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+    
     await update.message.reply_text(
-        f"✅ Configuration Complete!\n\n"
-        f"Mode  : {mode}\n"
-        f"Date  : {user_config.get('scan_date', 'N/A')}\n"
-        f"Days  : {user_config.get('days', 'N/A')}\n"
-        f"Coins : {', '.join(user_config['coins'])}\n\n"
-        f"Use /run to start the scan with these settings."
+        f"📋 *Configuration Summary*\n\n"
+        f"Mode    : {mode_emoji} {mode}\n"
+        f"Date    : {date}\n"
+        f"Days    : {days}\n"
+        f"Coins   : {', '.join(coins)}\n\n"
+        f"Ready to scan!",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
     )
+
+
+async def cmd_config_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle final confirmation"""
+    text = update.message.text
+    
+    if "Run" in text or "Run Scan" in text:
+        await cmd_run(update, context)
+    elif "Reconfig" in text:
+        await cmd_config_start(update, context)
+        return SELECT_MODE
+    
     return ConversationHandler.END
 
 
@@ -547,11 +767,13 @@ def main():
         entry_points=[CommandHandler("config", cmd_config_start)],
         states={
             SELECT_MODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_mode)],
-            SELECT_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_date)],
-            SELECT_DAYS: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_days)],
+            SELECT_DATE_DAYS: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_date_days)],
+            SELECT_DATE_CUSTOM: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_date_custom)],
+            SELECT_DAYS_CUSTOM: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_days_custom)],
             SELECT_COINS: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_coins)],
+            CONFIRM_SETUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_config_confirm)],
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("cancel", cmd_config_start)],
     )
     
     app.add_handler(CommandHandler("start", cmd_start))
