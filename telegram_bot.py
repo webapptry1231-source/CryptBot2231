@@ -31,6 +31,12 @@ def scan_coin(symbol: str) -> dict:
         if current_hour < TRADE_HOURS_START or current_hour >= TRADE_HOURS_END:
             return {"symbol": symbol, "score": 0, "reason": "outside_trade_hours", "price": 0, "error": None}
         
+        # BTC Master Switch: If BTC is bearish, disable altcoin LONGs
+        if symbol != "BTC/USDT":
+            btc_bullish = check_4h_trend("BTC/USDT")
+            if not btc_bullish:
+                return {"symbol": symbol, "score": 0, "reason": "btc_bearish_block", "price": 0, "error": None}
+        
         if not check_4h_trend(symbol):
             return {"symbol": symbol, "score": 0, "reason": "4h_bearish", "price": 0, "error": None}
         

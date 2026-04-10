@@ -171,11 +171,13 @@ def scan_daily_historical(symbol: str, days: int) -> list:
                 total_scanned += 1
                 continue
 
-            # ── FILTER: blocked days (Mon=0, Sat=5) ─────────────────────────────
+            # ── FILTER: blocked days (Mon=0, Sat=5) - Allow only if Bearish ─────
             if current_time.weekday() in TRADE_DAYS_BLOCKED:
-                dbg_day_filtered += 1
-                total_scanned += 1
-                continue
+                # Allow Mon/Sat only if regime is SHORT (Bearish) - harvest short profits
+                if current_regime != "SHORT":
+                    dbg_day_filtered += 1
+                    total_scanned += 1
+                    continue
 
             # ── FILTER: Neutral Zone (sleep mode) ───────────────────────────────
             if current_regime == "NEUTRAL":
