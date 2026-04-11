@@ -337,7 +337,21 @@ def _simulate_trade(
     else:
         entry_price = raw_entry * (1 - SLIPPAGE_PERCENT / 100)
     current_time = df.index[i + 1]  # Entry happens at next candle
+
+    # Calculate absolute price levels from percentages
+    if direction == "LONG":
+        sl_price  = entry_price * (1 - sl_percent / 100)
+        tp_price  = entry_price * (1 + tp_percent / 100)
+    else:
+        sl_price  = entry_price * (1 + sl_percent / 100)
+        tp_price  = entry_price * (1 - tp_percent / 100)
     
+    # Partial TP at PARTIAL_TP_PERCENT (1%)
+    if direction == "LONG":
+        partial_tp_price = entry_price * (1 + PARTIAL_TP_PERCENT / 100)
+    else:
+        partial_tp_price = entry_price * (1 - PARTIAL_TP_PERCENT / 100)
+
     # Check timeout (3 hours = 12 candles on 15m)
     max_candles_timeout = int(TIMEOUT_HOURS * 60 / 15)  # 12 candles
     hold_candles = min(max_hold, total_candles - i - 1, max_candles_timeout)
